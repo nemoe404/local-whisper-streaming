@@ -277,6 +277,50 @@ proof_tidy() {
     mark_red tidy
 }
 
+proof_legs_consistency() {
+    local source=${LWS_LEGS_AGENTS_MD:-$LWS_GATE_ROOT/AGENTS.md} dir legs rc=0
+    dir=$(mktemp -d)
+    if [[ ! -f $source ]]; then
+        # AGENTS.md is local-only, so a fresh clone has none. The proof then runs on a fixture built from
+        # the decision line, outside the repository; legs_consistency.sh itself still reports 77 on its own.
+        legs=$(sed -n 's/^Decision: legs = //p' measurements/ctest-legs.md)
+        printf 'ctest legs: %s\n' "$legs" >"$dir/fixture.md"
+        source=$dir/fixture.md
+        echo "NOTE legs-consistency: AGENTS.md is absent; proving on a fixture built from the decision line"
+    fi
+    gate_expect_green legs-consistency -- env "LWS_LEGS_AGENTS_MD=$source" tests/gates/legs_consistency.sh ||
+        rc=1
+    if ((rc == 0)); then
+        mark_green legs-consistency
+        # The differing copy lives outside the repository: the last leg is removed from its `ctest legs:` line.
+        python3 -I - "$source" "$dir/differs.md" <<'PY' || rc=1
+import re, sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+
+
+def drop_last(match):
+    items = [item.strip() for item in match.group(1).split(",")]
+    return "ctest legs: " + ", ".join(items[:-1])
+
+
+out, count = re.subn(
+    r"ctest legs:\s*([a-z0-9][a-z0-9-]*(?:\s*,\s*[a-z0-9][a-z0-9-]*)*)", drop_last, text, count=1
+)
+if count != 1:
+    sys.exit(2)
+open(sys.argv[2], "w", encoding="utf-8").write(out)
+PY
+    fi
+    if ((rc == 0)); then
+        gate_expect_red legs-consistency LEGS-DIFFER -- env "LWS_LEGS_AGENTS_MD=$dir/differs.md" \
+            tests/gates/legs_consistency.sh || rc=1
+    fi
+    rm -rf -- "$dir"
+    ((rc == 0)) || return 1
+    mark_red legs-consistency
+}
+
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
 if ((${#proof_fns[@]} == 0)); then
     echo "static_gates_red: no proof functions found; refusing to pass an empty run" >&2

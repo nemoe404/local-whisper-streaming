@@ -47,9 +47,11 @@ Requirements: Linux, clang 21, CMake 3.28+, Conan 2. CUDA is optional.
 
 ```sh
 git submodule update --init --recursive
-./scripts/fetch-models.sh   # Silero VAD weights; fetched, never committed
-cmake --preset debug && cmake --build --preset debug
-ctest --preset debug
+./scripts/fetch-models.sh silero-v5.1.2   # Silero VAD weights; fetched, never committed
+export LWS_BUILD_ID=dev                   # build/dev/ holds the Conan output and every preset's tree
+./scripts/deps.sh Debug
+cmake --preset asan-ubsan && cmake --build --preset asan-ubsan
+ctest --preset asan-ubsan
 ```
 
 ## Built on a [whisper.cpp](https://github.com/nemoe404/whisper.cpp/tree/consigliere-v1.9.5) fork
