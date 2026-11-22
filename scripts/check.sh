@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The gate entry point. Stages in order: format, deps, then one leg per preset (configure, build,
-# ctest, skip count). Takes no arguments: a leg name would silently narrow the sweep, so any
-# argument is refused. Every exit status is read directly; no gate decision reads a pipe.
+# The gate entry point. Stages in order: format, toolchain (presets), deps, then one leg per preset
+# (configure, toolchain, build, ctest, skip count). Takes no arguments: a leg name would silently
+# narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
+# reads a pipe.
 set -euo pipefail
 
 if (($# != 0)); then
@@ -28,6 +29,16 @@ scripts/format.sh || status=$?
 if ((status != 0)); then
     echo "check: format failed (exit $status)" >&2
     exit "$status"
+fi
+
+# Static half of the toolchain gate: every declared preset resolves to clang 21 (BLD-02). It needs no
+# configure, so it runs before deps and before any leg.
+stage "toolchain (presets)"
+status=0
+cmake -DLWS_ROOT="$root" -P "$root/scripts/toolchain-gate.cmake" >"$logs/toolchain-presets.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: toolchain gate (presets) failed (exit $status); see $logs/toolchain-presets.log" >&2
+    exit 1
 fi
 
 stage "dependencies (Debug)"
@@ -57,6 +68,16 @@ for leg in "${legs[@]}"; do
     cmake --preset "$leg" >"$logs/$leg.configure.log" 2>&1 || status=$?
     if ((status != 0)); then
         echo "check: configure failed for $leg (exit $status); see $logs/$leg.configure.log" >&2
+        exit 1
+    fi
+
+    # Configured half of the toolchain gate: the compiler identity this leg recorded and the compiler of
+    # every compile-database entry must be clang 21 (BLD-02, success criterion 1).
+    status=0
+    cmake -DLWS_ROOT="$root" -DLWS_BUILD_ID="$id" -DLWS_LEGS="$leg" -P "$root/scripts/toolchain-gate.cmake" \
+        >"$logs/$leg.toolchain.log" 2>&1 || status=$?
+    if ((status != 0)); then
+        echo "check: toolchain gate failed for $leg (exit $status); see $logs/$leg.toolchain.log" >&2
         exit 1
     fi
 
@@ -91,4 +112,4 @@ for leg in "${legs[@]}"; do
 done
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,legs(%s)\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,legs(%s)\n' "$legs_joined"

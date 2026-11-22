@@ -16,3 +16,10 @@ foreach(_src IN LISTS LWS_SMOKE_TESTS)
         PROPERTIES LABELS smoke TIMEOUT 120
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
 endforeach()
+
+# Gate verdict rows, run in script mode through the same cmake binary that drives the build. The
+# driver includes cmake/Clang21Toolchain.cmake, so the row verdicts and configure share one owner.
+add_test(NAME toolchain_verdict_cases
+    COMMAND ${CMAKE_COMMAND} -DLWS_ROOT=${PROJECT_SOURCE_DIR}
+            -P ${PROJECT_SOURCE_DIR}/tests/gates/toolchain_verdict_cases.cmake)
+set_tests_properties(toolchain_verdict_cases PROPERTIES LABELS gate TIMEOUT 120)
