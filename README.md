@@ -52,7 +52,7 @@ cmake --preset debug && cmake --build --preset debug
 ctest --preset debug
 ```
 
-## Built on a whisper.cpp fork
+## Built on a [whisper.cpp](https://github.com/nemoe404/whisper.cpp/tree/consigliere-v1.9.5) fork
 
 The build uses `nemoe404/whisper.cpp`, branch `consigliere-v1.9.5`: upstream v1.9.5 plus the patches that
 [consigliere](https://consigliere.observer) needs (CUDA kernel set, CUDA device visibility, abort handling
