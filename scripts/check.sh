@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The gate entry point. Stages in order: format, toolchain (presets), deps, then one leg per preset
+# The gate entry point. Stages in order: format, toolchain (presets), models, deps, then one leg per preset
 # (configure, toolchain, isa, build, ctest, skip count), then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
@@ -42,6 +42,16 @@ if ((status != 0)); then
     exit 1
 fi
 
+# The Silero smoke test loads models/ggml-silero-v5.1.2.bin. fetch-models.sh is idempotent and re-verifies
+# an existing file against scripts/models.sha256, so the legs only ever load verified bytes.
+stage "models"
+status=0
+scripts/fetch-models.sh silero-v5.1.2 >"$logs/models.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: model fetch failed (exit $status); see $logs/models.log" >&2
+    exit 1
+fi
+
 stage "dependencies (Debug)"
 status=0
 scripts/deps.sh Debug || status=$?
@@ -50,7 +60,8 @@ if ((status != 0)); then
     exit "$status"
 fi
 
-legs=(debug release)
+# tsan joins once its scope is measured. asan-ubsan installs Debug deps like debug.
+legs=(asan-ubsan debug release)
 for leg in "${legs[@]}"; do
     if [[ $leg == release ]]; then
         # The Conan output folder is shared by every preset of this id, so it is reinstalled for the
@@ -138,4 +149,4 @@ if ((status != 0)); then
 fi
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,build,ctest\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,build,ctest\n' "$legs_joined"

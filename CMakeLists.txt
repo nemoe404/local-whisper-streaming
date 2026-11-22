@@ -23,11 +23,24 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 option(LWS_BUILD_TESTS "Build the tests" OFF)
 
+# Sanitizer leg (BLD-04, D-01). CMakePresets.json selects it; an unknown value stops here, before the
+# whisper.cpp subdirectory, so a typo cannot build an uninstrumented leg that still calls itself asan-ubsan.
+set(LWS_SANITIZER off CACHE STRING "asan-ubsan, tsan or off")
+include(${PROJECT_SOURCE_DIR}/cmake/SanitizerFlags.cmake)
+lws_sanitizer_flags("${LWS_SANITIZER}" LWS_SANITIZER_COMPILE LWS_SANITIZER_LINK)
+
 # Linked only by our own targets. whisper.cpp and ggml never see these flags.
 add_library(lws_warnings INTERFACE)
 target_compile_options(lws_warnings INTERFACE
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wold-style-cast
     -Wnon-virtual-dtor -Wimplicit-fallthrough -Wdouble-promotion -Werror)
+
+# Instrumentation must cover every linked translation unit: ours through this target, whisper.cpp's
+# through the project hook below. It is deliberately separate from lws_warnings, which must never reach
+# whisper.cpp.
+add_library(lws_sanitizers INTERFACE)
+target_compile_options(lws_sanitizers INTERFACE ${LWS_SANITIZER_COMPILE})
+target_link_options(lws_sanitizers INTERFACE ${LWS_SANITIZER_LINK})
 
 # whisper.cpp is built as static archives from the submodule (D-01). The policy and the plain
 # set must both come before add_subdirectory: the fork's root declares cmake_minimum_required(3.5),
@@ -44,6 +57,14 @@ if(NOT "${_lws_baseline_reason}" STREQUAL "")
     message(FATAL_ERROR "lws: ${_lws_baseline_reason}")
 endif()
 lws_pin_ggml_cpu_baseline()
+# The one owner of the whisper.cpp project hook (D-01): cmake/EnableSanitizers.cmake runs as the last
+# step of project("whisper.cpp") and instruments the whisper.cpp subtree (ggml included) from inside its
+# own directory scope. No preset names the hook, so `cmake --preset tsan` and a preset-less configure with
+# -DLWS_SANITIZER=tsan take the same route. A normal variable shadows any cache entry of that name.
+# With LWS_SANITIZER off the variable stays unset and whisper.cpp's project() includes nothing.
+if(NOT "${LWS_SANITIZER_COMPILE}" STREQUAL "")
+    set(CMAKE_PROJECT_whisper.cpp_INCLUDE "${PROJECT_SOURCE_DIR}/cmake/EnableSanitizers.cmake")
+endif()
 set(GGML_OPENMP OFF CACHE BOOL "ggml: use OpenMP (libomp is absent; ggml has its own thread pool)" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "whisper: build tests" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "whisper: build examples" FORCE)
@@ -56,7 +77,7 @@ lws_check_ggml_cpu_baseline()
 
 add_library(lws_smoke STATIC src/smoke/lws_smoke.cpp)
 target_include_directories(lws_smoke PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(lws_smoke PRIVATE whisper lws_warnings)
+target_link_libraries(lws_smoke PRIVATE whisper lws_warnings lws_sanitizers)
 
 if(LWS_BUILD_TESTS)
     enable_testing()
