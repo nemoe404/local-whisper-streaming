@@ -45,22 +45,37 @@ function(lws_select_cpu_baseline out_list out_reason name)
     set(${out_reason} "${_reason}" PARENT_SCOPE)
 endfunction()
 
+# lws_isa_flag_refusal(<out_var> <option>)
+# Sets <out_var> in the caller to one `[isa]` reason for <option>, or to "" when the option holds the
+# baseline. The one rule for a single option, shared by lws_ggml_isa_verdict (configure) and the
+# compile-database sweep (scripts/isa-gate.cmake):
+#   - any -march=, -mtune= or -mcpu= whatever its value (a generator expression still counts);
+#   - any above-baseline ISA flag (-mavx512*, -mavxvnni*, -mamx*, -mavx10*).
+# The boundary keeps -DX-march=native from matching: the flag must start the argument or follow a
+# character that is not a name character or a dash. Pure: reads only its arguments.
+function(lws_isa_flag_refusal out_var option)
+    set(_reason "")
+    set(_boundary "(^|[^-A-Za-z0-9_.])")
+    if("${option}" MATCHES "${_boundary}(-m(arch|tune|cpu)=[^ >;]*)")
+        set(_reason "[isa] host/arch flag ${CMAKE_MATCH_2}")
+    elseif("${option}" MATCHES "${_boundary}(-m(avx512|avxvnni|amx|avx10)[^ >;]*)")
+        set(_reason "[isa] above-baseline flag ${CMAKE_MATCH_2}")
+    endif()
+    set(${out_var} "${_reason}" PARENT_SCOPE)
+endfunction()
+
 # lws_ggml_isa_verdict(<out_var> <compile-option>...)
 # Sets <out_var> in the caller to a list of `[isa]` reasons, one per finding, or to "" when the
 # options hold the baseline:
-#   - any -march=, -mtune= or -mcpu= whatever its value (a generator expression still counts);
-#   - any above-baseline ISA flag (-mavx512*, -mavxvnni*, -mamx*, -mavx10*);
+#   - every option that lws_isa_flag_refusal refuses;
 #   - no -mavx2 item at all: non-vacuity, the caller must have read ggml-cpu's real options.
 # Pure: reads only its arguments.
 function(lws_ggml_isa_verdict out_var)
     set(_reasons "")
-    set(_boundary "(^|[^-A-Za-z0-9_.])")
     foreach(_opt IN LISTS ARGN)
-        if(_opt MATCHES "${_boundary}(-m(arch|tune|cpu)=[^ >;]*)")
-            list(APPEND _reasons "[isa] host/arch flag ${CMAKE_MATCH_2}")
-        endif()
-        if(_opt MATCHES "${_boundary}(-m(avx512|avxvnni|amx|avx10)[^ >;]*)")
-            list(APPEND _reasons "[isa] above-baseline flag ${CMAKE_MATCH_2}")
+        lws_isa_flag_refusal(_reason "${_opt}")
+        if(NOT "${_reason}" STREQUAL "")
+            list(APPEND _reasons "${_reason}")
         endif()
     endforeach()
     if(NOT "-mavx2" IN_LIST ARGN)

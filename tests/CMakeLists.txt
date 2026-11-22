@@ -23,3 +23,8 @@ add_test(NAME toolchain_verdict_cases
     COMMAND ${CMAKE_COMMAND} -DLWS_ROOT=${PROJECT_SOURCE_DIR}
             -P ${PROJECT_SOURCE_DIR}/tests/gates/toolchain_verdict_cases.cmake)
 set_tests_properties(toolchain_verdict_cases PROPERTIES LABELS gate TIMEOUT 120)
+
+add_test(NAME isa_verdict_cases
+    COMMAND ${CMAKE_COMMAND} -DLWS_ROOT=${PROJECT_SOURCE_DIR}
+            -P ${PROJECT_SOURCE_DIR}/tests/gates/isa_verdict_cases.cmake)
+set_tests_properties(isa_verdict_cases PROPERTIES LABELS gate TIMEOUT 120)

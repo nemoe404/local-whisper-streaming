@@ -81,6 +81,15 @@ for leg in "${legs[@]}"; do
         exit 1
     fi
 
+    # Native-ISA sweep of this leg's compile database and cache (BLD-01, success criterion 2).
+    status=0
+    cmake -DLWS_ROOT="$root" -DLWS_BUILD_ID="$id" -DLWS_LEGS="$leg" -P "$root/scripts/isa-gate.cmake" \
+        >"$logs/$leg.isa.log" 2>&1 || status=$?
+    if ((status != 0)); then
+        echo "check: ISA gate failed for $leg (exit $status); see $logs/$leg.isa.log" >&2
+        exit 1
+    fi
+
     status=0
     cmake --build --preset "$leg" >"$logs/$leg.build.log" 2>&1 || status=$?
     if ((status != 0)); then
