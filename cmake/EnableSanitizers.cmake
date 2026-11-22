@@ -28,6 +28,12 @@
 # lws targets get the same lists through the lws_sanitizers INTERFACE target in the root
 # CMakeLists.txt, and scripts/sanitizer-gate.cmake proves every compile entry carries them.
 # The BLD-04 reading is recorded in the 01-03 summary ("Readings to confirm").
+#
+# Measured scope: measurements/sanitizer-scope.md, Outcome A under the post-hoc amended H1 (the amendment
+# and the outcome are recorded there). The tsan test preset sets no label filter, so real-model and ggml-mt
+# tests run on tsan with ggml instrumented (scope all); label smoke is never filtered. The measurement covers
+# our code and its boundary with whisper.cpp only: five runs per configuration and thread count. It does not
+# prove that ggml's internals are race-free.
 
 if(NOT "${PROJECT_NAME}" STREQUAL "whisper.cpp")
     message(FATAL_ERROR
