@@ -66,12 +66,3 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
-
-AGENTS.md
-.agents
-.claude
-/.vscode*
-
-docs
-# GSD planning docs kept local (commit_docs=false)
-.planning/
