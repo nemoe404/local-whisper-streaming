@@ -28,6 +28,17 @@ option(LWS_BUILD_TESTS "Build the tests" OFF)
 set(LWS_SANITIZER off CACHE STRING "asan-ubsan, tsan or off")
 include(${PROJECT_SOURCE_DIR}/cmake/SanitizerFlags.cmake)
 lws_sanitizer_flags("${LWS_SANITIZER}" LWS_SANITIZER_COMPILE LWS_SANITIZER_LINK)
+# Measurement-only switch for success criterion 3 (uninstrumented ggml under TSan): `lws-only` leaves the
+# whisper.cpp subtree uninstrumented while lws targets stay instrumented. Both sanitizer presets keep
+# `all`, which BLD-04 and scripts/sanitizer-gate.cmake require.
+set(LWS_SANITIZER_SCOPE all CACHE STRING "all or lws-only (measurement-only; presets keep all)")
+set_property(CACHE LWS_SANITIZER_SCOPE PROPERTY STRINGS all lws-only)
+if(NOT LWS_SANITIZER_SCOPE STREQUAL "all" AND NOT LWS_SANITIZER_SCOPE STREQUAL "lws-only")
+    message(FATAL_ERROR "lws: unknown LWS_SANITIZER_SCOPE='${LWS_SANITIZER_SCOPE}' (expected all or lws-only)")
+endif()
+if(LWS_SANITIZER_SCOPE STREQUAL "lws-only" AND "${LWS_SANITIZER_COMPILE}" STREQUAL "")
+    message(FATAL_ERROR "lws: LWS_SANITIZER_SCOPE=lws-only needs LWS_SANITIZER=asan-ubsan or tsan")
+endif()
 
 # Linked only by our own targets. whisper.cpp and ggml never see these flags.
 add_library(lws_warnings INTERFACE)

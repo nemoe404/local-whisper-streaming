@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The gate entry point. Stages in order: format, toolchain (presets), models, deps, then one leg per preset
-# (configure, toolchain, isa, build, ctest, skip count), then cppcheck and clang-tidy over the owned
+# (configure, toolchain, isa, sanitizer, build, ctest, skip count), then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
 # reads a pipe.
@@ -102,6 +102,16 @@ for leg in "${legs[@]}"; do
         exit 1
     fi
 
+    # Sanitizer gate: an asan-ubsan or tsan leg must carry its -fsanitize option on every compile entry,
+    # ggml included, with scope all; a leg with no sanitizer must carry none (BLD-04, success criterion 3).
+    status=0
+    cmake -DLWS_ROOT="$root" -DLWS_BUILD_ID="$id" -DLWS_LEGS="$leg" -P "$root/scripts/sanitizer-gate.cmake" \
+        >"$logs/$leg.sanitizer.log" 2>&1 || status=$?
+    if ((status != 0)); then
+        echo "check: sanitizer gate failed for $leg (exit $status); see $logs/$leg.sanitizer.log" >&2
+        exit 1
+    fi
+
     status=0
     cmake --build --preset "$leg" >"$logs/$leg.build.log" 2>&1 || status=$?
     if ((status != 0)); then
@@ -149,4 +159,4 @@ if ((status != 0)); then
 fi
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,build,ctest\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
