@@ -36,6 +36,10 @@ readonly SOURCE_OVERRIDE=${LWS_MODELS_SOURCE:-}
 readonly -a MODEL_ORDER=(silero-v5.1.2 tiny.en base.en small.en large-v3-turbo-q8_0)
 declare -A MODEL_URL=(
     [silero-v5.1.2]="https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin"
+    [tiny.en]="https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin"
+    [base.en]="https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin"
+    [small.en]="https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en.bin"
+    [large-v3-turbo-q8_0]="https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q8_0.bin"
 )
 readonly -A MODEL_URL
 
