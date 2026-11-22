@@ -38,8 +38,19 @@ if ((status != 0)); then
     exit "$status"
 fi
 
-legs=(debug)
+legs=(debug release)
 for leg in "${legs[@]}"; do
+    if [[ $leg == release ]]; then
+        # The Conan output folder is shared by every preset of this id, so it is reinstalled for the
+        # build type of the leg that follows (Release here).
+        stage "dependencies (Release)"
+        status=0
+        scripts/deps.sh Release || status=$?
+        if ((status != 0)); then
+            echo "check: deps failed (exit $status); see $logs/conan-Release.log" >&2
+            exit "$status"
+        fi
+    fi
     stage "leg $leg"
 
     status=0

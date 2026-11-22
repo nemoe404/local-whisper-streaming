@@ -14,6 +14,7 @@
         "CMAKE_C_COMPILER": "clang-21",
         "CMAKE_CXX_COMPILER": "clang++-21",
         "GGML_NATIVE": "OFF",
+        "LWS_CPU_BASELINE": "x86-64-v3",
         "LWS_BUILD_TESTS": "ON"
       }
     },
@@ -21,15 +22,28 @@
       "name": "debug",
       "inherits": "base",
       "displayName": "Debug"
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release (optimised, NDEBUG)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     }
   ],
   "buildPresets": [
-    { "name": "debug", "configurePreset": "debug" }
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" }
   ],
   "testPresets": [
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     }
