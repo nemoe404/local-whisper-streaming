@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cppcheck gate over the repo-owned translation units of the debug compile database.
+# cppcheck gate over the repo-owned translation units of the asan-ubsan compile database.
 #
 # Owned means what scripts/tidy.sh means: not under third_party/ or build/, and inside the repository.
 # The owned entries are written to build/$id/logs/cppcheck-db.json and that file is the --project, so
@@ -13,7 +13,7 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 id=${LWS_BUILD_ID:-gate}
-preset=${LWS_DB_PRESET:-debug}
+preset=${LWS_DB_PRESET:-asan-ubsan}
 db="build/$id/$preset/compile_commands.json"
 logs="build/$id/logs"
 [[ $# -eq 0 ]] || { echo "usage: scripts/cppcheck.sh" >&2; exit 2; }

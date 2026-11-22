@@ -60,8 +60,9 @@ if ((status != 0)); then
     exit "$status"
 fi
 
-# Measured scope: Outcome A (measurements/sanitizer-scope.md). tsan installs Debug deps like debug and asan-ubsan.
-legs=(asan-ubsan tsan debug release)
+# Measured legs: measurements/ctest-legs.md (debug has no defect only it catches). Measured tsan scope:
+# Outcome A (measurements/sanitizer-scope.md). tsan installs Debug deps like asan-ubsan.
+legs=(asan-ubsan tsan release)
 for leg in "${legs[@]}"; do
     if [[ $leg == release ]]; then
         # The Conan output folder is shared by every preset of this id, so it is reinstalled for the

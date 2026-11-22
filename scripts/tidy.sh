@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# clang-tidy gate for the repo-owned translation units of the debug compile database.
+# clang-tidy gate for the repo-owned translation units of the asan-ubsan compile database.
 #
 #   scripts/tidy.sh <file>...        check the given files (cheap, run after every edit)
 #   scripts/tidy.sh --all            check every owned translation unit (the gate)
@@ -17,7 +17,7 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 id=${LWS_BUILD_ID:-gate}
-preset=${LWS_DB_PRESET:-debug}
+preset=${LWS_DB_PRESET:-asan-ubsan}
 build_dir="build/$id/$preset"
 db="$build_dir/compile_commands.json"
 tidy=${CLANG_TIDY:-clang-tidy-21}

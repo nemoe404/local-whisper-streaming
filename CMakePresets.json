@@ -20,11 +20,6 @@
       }
     },
     {
-      "name": "debug",
-      "inherits": "base",
-      "displayName": "Debug"
-    },
-    {
       "name": "release",
       "inherits": "base",
       "displayName": "Release (optimised, NDEBUG)",
@@ -44,18 +39,11 @@
     }
   ],
   "buildPresets": [
-    { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
     { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
     { "name": "tsan", "configurePreset": "tsan" }
   ],
   "testPresets": [
-    {
-      "name": "debug",
-      "configurePreset": "debug",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
-    },
     {
       "name": "release",
       "configurePreset": "release",
