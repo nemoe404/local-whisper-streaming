@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The gate entry point. Stages in order: format, toolchain (presets), deps, then one leg per preset
-# (configure, toolchain, build, ctest, skip count). Takes no arguments: a leg name would silently
+# (configure, toolchain, isa, build, ctest, skip count), then cppcheck and clang-tidy over the owned
+# translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
 # reads a pipe.
 set -euo pipefail
@@ -120,5 +121,21 @@ for leg in "${legs[@]}"; do
     fi
 done
 
+stage "cppcheck"
+status=0
+scripts/cppcheck.sh || status=$?
+if ((status != 0)); then
+    echo "check: cppcheck failed (exit $status); see $logs/cppcheck.log" >&2
+    exit 1
+fi
+
+stage "clang-tidy"
+status=0
+scripts/tidy.sh --all || status=$?
+if ((status != 0)); then
+    echo "check: clang-tidy failed (exit $status); see $logs/tidy-*.log" >&2
+    exit 1
+fi
+
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,legs(%s)\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,build,ctest\n' "$legs_joined"
