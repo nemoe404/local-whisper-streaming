@@ -44,6 +44,100 @@ step() {
     fi
 }
 
+# red_with {name} {token}... -- {cmd...}: gate_expect_red for a gate that must show more than one token
+# (the gate's own marker and the seeded defect's name). The first token goes through gate_expect_red; every
+# further token must also be in the red run's log, or the proof fails.
+red_with() {
+    local name=$1 first out status=0 token
+    shift
+    first=$1
+    local rest=()
+    shift
+    while [[ ${1:-} != -- ]]; do
+        rest+=("$1")
+        shift
+    done
+    shift
+    out=$(gate_expect_red "$name" "$first" -- "$@") || status=$?
+    if ((status != 0)); then
+        printf '%s\n' "$out"
+        return 1
+    fi
+    for token in "${rest[@]}"; do
+        if ! grep -qF -- "$token" "$GATE_LOGS/gates/$name.log"; then
+            echo "RED-FAIL $name: the log lacks '$token' (see $GATE_LOGS/gates/$name.log)"
+            return 1
+        fi
+    done
+    printf '%s\n' "$out"
+}
+
+# preset_info {name|-}: prints "{preset} {build type}". `-` selects the first non-hidden configure preset
+# of CMakePresets.json; the build type is resolved through `inherits`.
+preset_info() {
+    python3 -I - "$LWS_GATE_ROOT/CMakePresets.json" "$1" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+presets = {p["name"]: p for p in doc["configurePresets"]}
+want = sys.argv[2]
+if want == "-":
+    visible = [p["name"] for p in doc["configurePresets"] if not p.get("hidden", False)]
+    if not visible:
+        sys.exit(2)
+    want = visible[0]
+
+def build_type(name):
+    preset = presets[name]
+    value = preset.get("cacheVariables", {}).get("CMAKE_BUILD_TYPE")
+    if value:
+        return value
+    parents = preset.get("inherits", [])
+    for parent in [parents] if isinstance(parents, str) else parents:
+        found = build_type(parent)
+        if found:
+            return found
+    return None
+
+kind = build_type(want)
+if kind not in ("Debug", "Release"):
+    sys.exit(2)
+print(want, kind)
+PY
+}
+
+# db_preset_default {script}: the LWS_DB_PRESET default written in scripts/tidy.sh or scripts/cppcheck.sh.
+db_preset_default() {
+    # shellcheck disable=SC2016 # the pattern matches the literal ${...} written in the scripts
+    sed -n 's/^preset=\${LWS_DB_PRESET:-\([a-z0-9-]*\)}$/\1/p' "$1"
+}
+
+# prepare {preset}: install the Conan dependencies for the preset's build type, then configure it.
+prepare() {
+    local preset=$1 info ptype
+    info=$(preset_info "$preset") || {
+        echo "SETUP-FAIL preset $preset: not a configure preset with a Debug or Release build type"
+        return 1
+    }
+    ptype=${info#* }
+    step "deps-$preset" -- scripts/deps.sh "$ptype" || return 1
+    step "cfg-$preset" -- cmake --preset "$preset" || return 1
+}
+
+# The gates as commands. Static toolchain gate: presets only. The configured gates read build/gate-seed/{leg}.
+toolchain_static() { cmake "-DLWS_ROOT=$LWS_GATE_ROOT" -P "$LWS_GATE_ROOT/scripts/toolchain-gate.cmake"; }
+leg_gate() {
+    cmake "-DLWS_ROOT=$LWS_GATE_ROOT" "-DLWS_BUILD_ID=$LWS_BUILD_ID" "-DLWS_LEGS=$2" \
+        -P "$LWS_GATE_ROOT/scripts/$1"
+}
+
+# A user preset that names one compiler pair and inherits everything else from `base`.
+seed_user_preset() {
+    printf '{"version": 6, "configurePresets": [{"name": "%s", "inherits": "base", "cacheVariables": {"CMAKE_C_COMPILER": "%s", "CMAKE_CXX_COMPILER": "%s"}}]}' "$1" "$2" "$3"
+}
+# The bare variant: no inherits and no toolchain file, so configure reaches the compiler verdict with gcc.
+# shellcheck disable=SC2016 # ${sourceDir} is a CMake preset macro, not a shell expansion
+seed_bare_preset='{"version": 6, "configurePresets": [{"name": "seed-gcc-bare", "generator": "Ninja", "binaryDir": "${sourceDir}/build/gate-seed/seed-gcc-bare", "cacheVariables": {"CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++", "LWS_CPU_BASELINE": "x86-64-v3"}}]}'
+
 proof_format() {
     local misformatted
     misformatted=$(
@@ -60,6 +154,127 @@ EOF
     gate_write tests/smoke/zz_seed_format_test.cpp "$misformatted"
     gate_expect_red format 'not clang-formatted' -- scripts/format.sh || return 1
     mark_red format
+}
+
+proof_toolchain_seed_gcc() {
+    gate_expect_green toolchain-seed-gcc -- toolchain_static || return 1
+    mark_green toolchain-seed-gcc
+    gate_write CMakeUserPresets.json "$(seed_user_preset seed-gcc gcc g++)"
+    red_with toolchain-seed-gcc '[toolchain][preset seed-gcc]' -- toolchain_static || return 1
+    mark_red toolchain-seed-gcc
+}
+
+proof_toolchain_seed_clang20() {
+    gate_expect_green toolchain-seed-clang20 -- toolchain_static || return 1
+    mark_green toolchain-seed-clang20
+    gate_write CMakeUserPresets.json "$(seed_user_preset seed-clang20 clang-20 clang++-20)"
+    red_with toolchain-seed-clang20 '[toolchain][preset seed-clang20]' -- toolchain_static || return 1
+    mark_red toolchain-seed-clang20
+}
+
+proof_toolchain_configure() {
+    prepare asan-ubsan || return 1
+    gate_expect_green toolchain-configure -- cmake --preset asan-ubsan || return 1
+    mark_green toolchain-configure
+    rm -rf -- "$LWS_GATE_ROOT/build/gate-seed/seed-gcc-bare"
+    gate_write CMakeUserPresets.json "$seed_bare_preset"
+    red_with toolchain-configure '[toolchain]' -- cmake --preset seed-gcc-bare || return 1
+    mark_red toolchain-configure
+}
+
+proof_toolchain_leg() {
+    prepare asan-ubsan || return 1
+    gate_expect_green toolchain-leg -- leg_gate toolchain-gate.cmake asan-ubsan || return 1
+    mark_green toolchain-leg
+    # Configure the gcc leg (it stops at the compiler verdict, after CMake wrote its compiler-ID files),
+    # then remove the user preset so the static layer is green and only the configured layer can refuse.
+    rm -rf -- "$LWS_GATE_ROOT/build/gate-seed/seed-gcc-bare"
+    gate_write CMakeUserPresets.json "$seed_bare_preset"
+    cmake --preset seed-gcc-bare >"$GATE_LOGS/gates/setup-seed-gcc-bare.log" 2>&1 || true
+    gate_restore_now || return 1
+    red_with toolchain-leg '[toolchain][leg seed-gcc-bare]' -- leg_gate toolchain-gate.cmake seed-gcc-bare ||
+        return 1
+    mark_red toolchain-leg
+}
+
+proof_isa() {
+    local info preset ptype rc=0
+    info=$(preset_info -) || return 1
+    preset=${info% *}
+    ptype=${info#* }
+    step deps-isa -- scripts/deps.sh "$ptype" || return 1
+    step cfg-isa -- cmake --preset "$preset" || return 1
+    gate_expect_green isa -- leg_gate isa-gate.cmake "$preset" || return 1
+    mark_green isa
+    gate_patch_append tests/CMakeLists.txt 'target_compile_options(smoke_link_test PRIVATE -march=native)'
+    step cfg-isa-seeded -- cmake --preset "$preset" || return 1
+    red_with isa '[isa]' 'link_test' -- leg_gate isa-gate.cmake "$preset" || rc=1
+    gate_restore_now || rc=1
+    step cfg-isa-restored -- cmake --preset "$preset" || rc=1
+    ((rc == 0)) || return 1
+    mark_red isa
+}
+
+proof_sanitizer_gate() {
+    local rc=0
+    prepare asan-ubsan || return 1
+    gate_expect_green sanitizer-gate -- leg_gate sanitizer-gate.cmake asan-ubsan || return 1
+    mark_green sanitizer-gate
+    step cfg-scope-lws-only -- cmake --preset asan-ubsan -DLWS_SANITIZER_SCOPE=lws-only || return 1
+    red_with sanitizer-gate '[sanitizer]' -- leg_gate sanitizer-gate.cmake asan-ubsan || rc=1
+    step cfg-scope-all -- cmake --preset asan-ubsan -DLWS_SANITIZER_SCOPE=all || rc=1
+    ((rc == 0)) || return 1
+    mark_red sanitizer-gate
+}
+
+proof_sanitizer_typo() {
+    local rc=0
+    prepare asan-ubsan || return 1
+    gate_expect_green sanitizer-typo -- cmake --preset asan-ubsan || return 1
+    mark_green sanitizer-typo
+    red_with sanitizer-typo 'unknown LWS_SANITIZER' -- cmake --preset asan-ubsan -DLWS_SANITIZER=nonsense ||
+        rc=1
+    step cfg-sanitizer-restored -- cmake --preset asan-ubsan -DLWS_SANITIZER=asan-ubsan || rc=1
+    ((rc == 0)) || return 1
+    mark_red sanitizer-typo
+}
+
+proof_cppcheck() {
+    local db rc=0
+    db=$(db_preset_default scripts/cppcheck.sh)
+    [[ -n $db && $db == "$(db_preset_default scripts/tidy.sh)" ]] || {
+        echo "SETUP-FAIL cppcheck: no single LWS_DB_PRESET default in scripts/cppcheck.sh and scripts/tidy.sh"
+        return 1
+    }
+    prepare "$db" || return 1
+    gate_expect_green cppcheck -- scripts/cppcheck.sh || return 1
+    mark_green cppcheck
+    gate_insert tests/gates/seeds/cppcheck_defect.cpp tests/smoke/zz_seed_cppcheck_test.cpp
+    step cfg-cppcheck-seeded -- cmake --preset "$db" || return 1
+    gate_expect_red cppcheck 'zz_seed_cppcheck_test.cpp' -- scripts/cppcheck.sh || rc=1
+    gate_restore_now || rc=1
+    step cfg-cppcheck-restored -- cmake --preset "$db" || rc=1
+    ((rc == 0)) || return 1
+    mark_red cppcheck
+}
+
+proof_tidy() {
+    local db rc=0
+    db=$(db_preset_default scripts/tidy.sh)
+    [[ -n $db && $db == "$(db_preset_default scripts/cppcheck.sh)" ]] || {
+        echo "SETUP-FAIL tidy: no single LWS_DB_PRESET default in scripts/cppcheck.sh and scripts/tidy.sh"
+        return 1
+    }
+    prepare "$db" || return 1
+    gate_expect_green tidy -- scripts/tidy.sh --all || return 1
+    mark_green tidy
+    gate_insert tests/gates/seeds/tidy_defect.cpp tests/smoke/zz_seed_tidy_test.cpp
+    step cfg-tidy-seeded -- cmake --preset "$db" || return 1
+    gate_expect_red tidy 'zz_seed_tidy_test.cpp' -- scripts/tidy.sh --all || rc=1
+    gate_restore_now || rc=1
+    step cfg-tidy-restored -- cmake --preset "$db" || rc=1
+    ((rc == 0)) || return 1
+    mark_red tidy
 }
 
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
