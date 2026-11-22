@@ -3,3 +3,7 @@
 	url = https://github.com/nemoe404/whisper.cpp.git
 	branch = consigliere-v1.9.5
 	ignore = dirty
+[submodule "third_party/pipewire-app-capture"]
+	path = third_party/pipewire-app-capture
+	url = https://github.com/nemoe404/pipewire-app-capture.git
+	ignore = dirty
