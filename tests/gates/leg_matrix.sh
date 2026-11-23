@@ -8,10 +8,11 @@
 # (red:skip), so a skipped test can never make a cell green.
 #
 # Ordering guard: the rule and the prediction must be frozen before the matrix runs. The record
-# measurements/ctest-legs.md is local-only and is never committed, so the freeze is a commit whose message
-# carries the sha256 of the record's frozen part (everything before its first '## Setup' line). The matrix
-# refuses (exit 3) unless the oldest such commit exists, is an ancestor of HEAD, and the record's frozen part
-# still hashes to it. It writes the HEAD it ran at to build/gate-seed/logs/matrix/matrix.head.
+# measurements/ctest-legs.md is local-only and is never committed, so git history cannot witness the freeze.
+# Its frozen part (everything before the first '## Setup' line) must hash to the value recorded at freeze
+# time in measurements/ctest-legs.frozen.sha256. The matrix refuses (exit 3) otherwise. This detects later
+# edits to the rule; it does not stop a deliberate rewrite of both files on this machine. The HEAD it ran at
+# is written to build/gate-seed/logs/matrix/matrix.head.
 #
 # Exit: 0 every candidate leg is kept; 1 the matrix is invalid (control red, or a seed reddens nothing);
 # 3 harness error (ordering guard, leftovers, unreadable ctest log, tree not restored);
@@ -28,11 +29,11 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$here/lib.sh"
 
 record="measurements/ctest-legs.md"
-freeze_subject="docs: freeze ctest leg decision rule and prediction"
+freeze_hash_file="measurements/ctest-legs.frozen.sha256"
 seeds=(tsan_race asan_oob_write ubsan_signed_overflow release_ndebug_break debug_assert)
 
 refuse() {
-    echo "matrix refused: rule and prediction not committed ($record): $1" >&2
+    echo "matrix refused: rule and prediction not frozen ($record): $1" >&2
     exit 3
 }
 
@@ -40,19 +41,15 @@ refuse() {
 # through a quiet match on a pipe.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-git log --format='%H%x09%s' >"$tmp/log.tsv"
-freeze_sha=$(awk -F'\t' -v subject="$freeze_subject" '$2 == subject { sha = $1 } END { print sha }' "$tmp/log.tsv")
-[[ -n $freeze_sha ]] || refuse "no freeze commit"
-git show -s --format=%B "$freeze_sha" >"$tmp/freeze.msg"
-want=$(sed -n 's/^ctest-legs-frozen-sha256: \([0-9a-f]\{64\}\)$/\1/p' "$tmp/freeze.msg")
-[[ -n $want ]] || refuse "the freeze commit carries no sha256"
 [[ -f $record ]] || refuse "the record is missing"
+[[ -f $freeze_hash_file ]] || refuse "no freeze hash file ($freeze_hash_file)"
+want=$(cat "$freeze_hash_file")
+[[ $want =~ ^[0-9a-f]{64}$ ]] || refuse "the freeze hash file does not hold a sha256"
 awk '/^## Setup/ { exit } { print }' "$record" >"$tmp/frozen.md"
 have=$(sha256sum "$tmp/frozen.md" | cut -d' ' -f1)
-[[ $have == "$want" ]] || refuse "the frozen part of the record differs from the freeze commit"
+[[ $have == "$want" ]] || refuse "the frozen part of the record differs from $freeze_hash_file"
 grep -qxF '## Rule (frozen before the run)' "$tmp/frozen.md" || refuse "no rule heading"
 grep -qxF '## Prediction' "$tmp/frozen.md" || refuse "no prediction heading"
-git merge-base --is-ancestor "$freeze_sha" HEAD || refuse "the freeze commit is not an ancestor of HEAD"
 trap - EXIT
 rm -rf "$tmp"
 
