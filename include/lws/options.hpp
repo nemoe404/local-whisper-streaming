@@ -8,7 +8,8 @@
 namespace lws {
 
 // One flat error channel for core validation and, later, shell calls. Trivially copyable.
-// Overrun, VadFailed and ModelLoad are declared now and unused until the shell phases.
+// The shell uses the last four: Overrun by the ring; VadFailed, ModelLoad and the frame-size
+// mismatch by the VAD engine and its probe.
 enum class Error : std::uint8_t {
     InvalidThreshold,
     InvalidDuration,
@@ -16,7 +17,8 @@ enum class Error : std::uint8_t {
     CeilingTooShort,
     Overrun,
     VadFailed,
-    ModelLoad
+    ModelLoad,
+    FrameSizeMismatch
 };
 
 // The single owner of the VAD frame size: 512 samples at 16 kHz is 32 ms.
