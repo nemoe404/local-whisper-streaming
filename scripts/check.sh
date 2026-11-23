@@ -32,7 +32,7 @@ if ((status != 0)); then
     exit "$status"
 fi
 
-# Static half of the toolchain gate: every declared preset resolves to clang 21 (BLD-02). It needs no
+# Static half of the toolchain gate: every declared preset resolves to clang 21. It needs no
 # configure, so it runs before deps and before any leg.
 stage "toolchain (presets)"
 status=0
@@ -42,9 +42,9 @@ if ((status != 0)); then
     exit 1
 fi
 
-# Tuning values stay out of constexpr under include/lws (GATE-02). A text scan of the public headers: no
+# Tuning values stay out of constexpr under include/lws. A text scan of the public headers: no
 # configure needed, so it runs before models and deps.
-stage "tuning values (GATE-02)"
+stage "tuning values"
 status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/tuning-gate.cmake" >"$logs/tuning.log" 2>&1 || status=$?
 if ((status != 0)); then
@@ -52,9 +52,9 @@ if ((status != 0)); then
     exit 1
 fi
 
-# The pure core stays free of whisper, spdlog and thread includes (SC5). A text scan: no configure needed.
+# The pure core stays free of whisper, spdlog and thread includes. A text scan: no configure needed.
 # The link closure of lws_core is checked by the core_link_closure ctest inside the release leg.
-stage "core isolation (SC5)"
+stage "core isolation"
 status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/core-isolation-gate.cmake" >"$logs/isolation.log" 2>&1 || status=$?
 if ((status != 0)); then
@@ -62,9 +62,9 @@ if ((status != 0)); then
     exit 1
 fi
 
-# The ring stays wait-free by construction (RING-03): no compare-and-swap, plain slots, no lock. A text
+# The ring stays wait-free by construction: no compare-and-swap, plain slots, no lock. A text
 # scan of the ring header: no configure needed.
-stage "ring wait-free (RING-03)"
+stage "ring wait-free"
 status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/ring-gate.cmake" >"$logs/ring.log" 2>&1 || status=$?
 if ((status != 0)); then
@@ -115,7 +115,7 @@ for leg in "${legs[@]}"; do
     fi
 
     # Configured half of the toolchain gate: the compiler identity this leg recorded and the compiler of
-    # every compile-database entry must be clang 21 (BLD-02, success criterion 1).
+    # every compile-database entry must be clang 21.
     status=0
     cmake -DLWS_ROOT="$root" -DLWS_BUILD_ID="$id" -DLWS_LEGS="$leg" -P "$root/scripts/toolchain-gate.cmake" \
         >"$logs/$leg.toolchain.log" 2>&1 || status=$?
@@ -124,7 +124,7 @@ for leg in "${legs[@]}"; do
         exit 1
     fi
 
-    # Native-ISA sweep of this leg's compile database and cache (BLD-01, success criterion 2).
+    # Native-ISA sweep of this leg's compile database and cache.
     status=0
     cmake -DLWS_ROOT="$root" -DLWS_BUILD_ID="$id" -DLWS_LEGS="$leg" -P "$root/scripts/isa-gate.cmake" \
         >"$logs/$leg.isa.log" 2>&1 || status=$?
@@ -134,7 +134,7 @@ for leg in "${legs[@]}"; do
     fi
 
     # Sanitizer gate: an asan-ubsan or tsan leg must carry its -fsanitize option on every compile entry,
-    # ggml included, with scope all; a leg with no sanitizer must carry none (BLD-04, success criterion 3).
+    # ggml included, with scope all; a leg with no sanitizer must carry none.
     status=0
     cmake -DLWS_ROOT="$root" -DLWS_BUILD_ID="$id" -DLWS_LEGS="$leg" -P "$root/scripts/sanitizer-gate.cmake" \
         >"$logs/$leg.sanitizer.log" 2>&1 || status=$?

@@ -49,7 +49,7 @@ lws::Options short_ceiling_options() {
 
 } // namespace
 
-// CORE-05, CORE-08: with the default options the ceiling is 438 frames. Steady speech from the
+// With the default options the ceiling is 438 frames. Steady speech from the
 // first frame emits nothing until the 438th, then cuts. All probabilities are equal, so min_element
 // picks the first minimum of the search span [438 - 47, 438), which is index 391. The remainder
 // starts 8 frames before the cut (frame 383) and is closed by a hangover.
@@ -75,7 +75,7 @@ TEST(CeilingTracer, SteadySpeechCutsAtTheCeilingAndTheRemainderIsClosedByHangove
     EXPECT_FLOAT_EQ(lws::test::frame_id(second, 0), 383.0F);
 }
 
-// CORE-05, Edge 10: the minimum inside the last 47 frames wins. Index 380 is lower but sits outside
+// The minimum inside the last 47 frames wins. Index 380 is lower but sits outside
 // the search span [391, 438), so it is ignored.
 TEST(CutSearch, MinimumInsideTheLastFortySevenFramesIsChosen) {
     auto windower = lws::test::make_windower();
@@ -86,7 +86,7 @@ TEST(CutSearch, MinimumInsideTheLastFortySevenFramesIsChosen) {
     EXPECT_EQ(emitted.front().reason, lws::CloseReason::Ceiling);
 }
 
-// Edge 10 boundary: index 391 is the first frame of the span, index 390 is just outside it.
+// Boundary: index 391 is the first frame of the span, index 390 is just outside it.
 TEST(CutSearch, FirstFrameOfTheSpanIsIncluded) {
     auto windower = lws::test::make_windower();
     const auto trace = speech_trace(438, {{390, 0.5F}, {391, 0.55F}});
@@ -95,7 +95,7 @@ TEST(CutSearch, FirstFrameOfTheSpanIsIncluded) {
     EXPECT_EQ(lws::test::frame_count(emitted.front()), 391U);
 }
 
-// CORE-05, Edge 12: equal minima resolve to the earliest frame.
+// Equal minima resolve to the earliest frame.
 TEST(CutSearch, TiesResolveToTheEarliestFrame) {
     auto windower = lws::test::make_windower();
     const auto trace = speech_trace(438, {{400, 0.55F}, {420, 0.55F}});
@@ -104,7 +104,7 @@ TEST(CutSearch, TiesResolveToTheEarliestFrame) {
     EXPECT_EQ(lws::test::frame_count(emitted.front()), 400U);
 }
 
-// CORE-05, Edge 11: the minimum at index 0 clamps to 1, so a cut never emits an empty segment.
+// The minimum at index 0 clamps to 1, so a cut never emits an empty segment.
 TEST(CutSearch, ClampKeepsTheCutAboveZero) {
     auto windower = lws::test::make_windower(short_ceiling_options());
     const auto trace = speech_trace(19, {{0, 0.5F}});
@@ -114,7 +114,7 @@ TEST(CutSearch, ClampKeepsTheCutAboveZero) {
     EXPECT_EQ(emitted.front().reason, lws::CloseReason::Ceiling);
 }
 
-// CORE-06, D2: 250 ms rounds up to 8 frames. The cut is at frame 400, the remainder starts at frame
+// 250 ms rounds up to 8 frames. The cut is at frame 400, the remainder starts at frame
 // 392: 8 frames, which is 8 * 512 == 4096 samples (256 ms).
 TEST(OverlapDefault, RemainderStartsEightFramesBeforeTheCutAsFourThousandNinetySixSamples) {
     auto windower = lws::test::make_windower();
@@ -132,7 +132,7 @@ TEST(OverlapDefault, RemainderStartsEightFramesBeforeTheCutAsFourThousandNinetyS
     EXPECT_FLOAT_EQ(lws::test::frame_id(second, 0), 392.0F);
 }
 
-// Edge 17, D-02, D-03: with no notice, every birth latches discontinuous_before = false. The cut
+// With no notice, every birth latches discontinuous_before = false. The cut
 // segment keeps its birth flags; the remainder sets continues_previous only.
 TEST(CutLatch, CutSegmentsCarryTheLatchedFlagsAndTheRemainderSetsContinuesOnly) {
     auto windower = lws::test::make_windower();
@@ -148,9 +148,9 @@ TEST(CutLatch, CutSegmentsCarryTheLatchedFlagsAndTheRemainderSetsContinuesOnly) 
     EXPECT_FALSE(closed.front().discontinuous_before);
 }
 
-// D-07 (user, 2026-11-23): the overlap is min(overlap_frames, cut - 1). A cut at frame 3 with an
-// 8-frame overlap removes 3 - 2 = 1 frame, so the remainder starts at frame 1. The literal rule
-// min(overlap, cut) = 3 would remove nothing (remainder start 0) and stall. With flat
+// Overlap rule (user decision, 2026-11-23): the overlap is min(overlap_frames, cut - 1). A cut at
+// frame 3 with an 8-frame overlap removes 3 - 2 = 1 frame, so the remainder starts at frame 1. The
+// literal rule min(overlap, cut) = 3 would remove nothing (remainder start 0) and stall. With flat
 // probabilities a small ceiling cuts after every frame or two; that is open question Q9 (accepted),
 // not a defect of this test.
 TEST(CutOverlapRule, CutAtFrameThreeLeavesARemainderThatStartsAtFrameOne) {
@@ -168,7 +168,7 @@ TEST(CutOverlapRule, CutAtFrameThreeLeavesARemainderThatStartsAtFrameOne) {
     EXPECT_FLOAT_EQ(lws::test::frame_id(second.front(), 0), 1.0F);
 }
 
-// CORE-06, D-08, D6: overlap_ms = 0 starts the remainder at the cut and turns the seam-merge query
+// overlap_ms = 0 starts the remainder at the cut and turns the seam-merge query
 // off. continues_previous still holds, because the remainder is still the continuation.
 TEST(OverlapZero, DisablesTheOverlapAndTheSeamMergeQuery) {
     lws::Options options;
@@ -189,7 +189,7 @@ TEST(OverlapZero, DisablesTheOverlapAndTheSeamMergeQuery) {
     EXPECT_TRUE(lws::seam_merge_enabled(lws::Options{}));
 }
 
-// CORE-08, D-02: three ceiling cuts in a row (at 438, 821 and 1204 frames fed). Only the first
+// Three ceiling cuts in a row (at 438, 821 and 1204 frames fed). Only the first
 // segment is born outside a continuation; every later one continues the previous.
 TEST(ContinuationChain, ARemainderThatIsCutAgainKeepsContinuesPrevious) {
     auto windower = lws::test::make_windower();
@@ -203,7 +203,7 @@ TEST(ContinuationChain, ARemainderThatIsCutAgainKeepsContinuesPrevious) {
     }));
 }
 
-// T-02-04: the window never grows past the ceiling. This pins bounded memory, not a cut rate: with
+// The window never grows past the ceiling. This pins bounded memory, not a cut rate: with
 // flat probabilities a 19-frame ceiling cuts after nearly every frame (open question Q9, accepted).
 TEST(BoundedShortCeiling, SteadySpeechWithNineteenFrameCeilingNeverGrowsPastTheCeiling) {
     auto windower = lws::test::make_windower(short_ceiling_options());
@@ -216,7 +216,7 @@ TEST(BoundedShortCeiling, SteadySpeechWithNineteenFrameCeilingNeverGrowsPastTheC
 }
 
 #ifdef NDEBUG
-// D11b: a NaN probability is stored as 0.0F in the cut history, so the cut picks it. The frame is
+// A NaN probability is stored as 0.0F in the cut history, so the cut picks it. The frame is
 // still sub-threshold. Release only: Debug builds trip the range assert in feed() first. A NaN left
 // in the history would never be picked by min_element, so this pins the 0.0F rule.
 TEST(NaNHistory, NaNProbabilityIsStoredAsZeroSoTheCutPicksIt) {

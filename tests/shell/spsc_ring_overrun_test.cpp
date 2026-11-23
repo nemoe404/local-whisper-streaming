@@ -37,7 +37,7 @@ void offer_and_tally(lws::SpscRing& ring, std::size_t first, std::size_t size,
 
 } // namespace
 
-// RING-01, RING-02: a span that does not fit is rejected whole, counted, and flagged.
+// A span that does not fit is rejected whole, counted, and flagged.
 TEST(SpscRingOverrun, SpanThatDoesNotFitIsRejectedWholeAndCounted) {
     lws::SpscRing ring{8};
     const std::vector<float> accepted = pattern(0, 6);
@@ -107,7 +107,7 @@ TEST(SpscRingOverrun, EmptySpanChangesNoCounter) {
     EXPECT_FALSE(ring.take_discontinuity());
 }
 
-// RING-02: with no pop at all, accepted + dropped == offered, and each equals the test's tally.
+// With no pop at all, accepted + dropped == offered, and each equals the test's tally.
 TEST(SpscRingCounters, StalledConsumerCountersAddUp) {
     lws::SpscRing ring{64};
     lws::RingCounters tally;

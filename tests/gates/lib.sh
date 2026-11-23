@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# tests/gates/lib.sh: the shared harness of the seeded-defect proofs (D-04). Sourced, never executed;
-# callers run under `set -euo pipefail`. leg_matrix.sh and skip_red.sh source it, and 01-06's
+# tests/gates/lib.sh: the shared harness of the seeded-defect proofs. Sourced, never executed;
+# callers run under `set -euo pipefail`. leg_matrix.sh and skip_red.sh source it, and
 # static_gates_red.sh sources it later, which is why gate_write, gate_patch_append and gate_patch_replace
 # exist here.
 #

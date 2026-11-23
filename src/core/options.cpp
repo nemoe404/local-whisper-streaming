@@ -8,7 +8,7 @@
 namespace lws {
 
 std::expected<Options, Error> validate(const Options& options) {
-    // Positive predicates, negated once, so NaN fails the check (D-13). Written as a negated
+    // Positive predicates, negated once, so NaN fails the check. Written as a negated
     // conjunction on purpose: De Morgan's rewrite (`<= 0 || >= 1`) would let NaN through.
     const bool threshold_inside = options.threshold > 0.0F && options.threshold < 1.0F;
     if (!threshold_inside) {
@@ -23,7 +23,7 @@ std::expected<Options, Error> validate(const Options& options) {
         return std::unexpected(Error::CeilingTooLong);
     }
 
-    // Convert to integers only after the checks above (T-02-01).
+    // Convert to integers only after the checks above.
     const auto ceiling = static_cast<std::uint64_t>(
         std::ceil(static_cast<double>(options.max_speech_duration_s) * 1000.0 / 32.0));
     const std::uint64_t pre = ms_to_frames_ceil(options.pre_roll_ms);

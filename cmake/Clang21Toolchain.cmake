@@ -1,4 +1,4 @@
-# cmake/Clang21Toolchain.cmake: the one owner of the pinned LLVM major (D-03).
+# cmake/Clang21Toolchain.cmake: the one owner of the pinned LLVM major.
 #
 # The compiler is pinned in two places that must agree: CMakePresets.json (CMAKE_C_COMPILER,
 # CMAKE_CXX_COMPILER) and profiles/clang-21 (compiler_executables). This module owns the major
@@ -7,7 +7,7 @@
 #
 # Why a verdict module and not a second toolchain file: CMake takes exactly one toolchainFile per
 # configure, and Conan's generated conan_toolchain.cmake owns that slot (it carries the profile's
-# settings and the CMakeDeps paths). See the readings-to-confirm entry in the 01-01 summary.
+# settings and the CMakeDeps paths).
 #
 # Script-mode safe: including this file only defines variables and functions, so `cmake -P` on it
 # is a no-op that exits 0.
@@ -42,9 +42,9 @@ endfunction()
 #                     [CUDA_HOST_ID <id> CUDA_HOST_VERSION <v>] EXPECTED_MAJOR <n>)
 #
 # Sets <out_var> in the caller to a list of `[toolchain]` reasons, or to "" when every checked leg
-# holds. The CUDA host leg runs only when CUDA_HOST_ID is non-empty (D-03's "CUDA with a GCC host").
-# No preset enables CUDA in this phase, so that leg is exercised by the verdict cases; Phase 5 feeds
-# it a real CUDA host. A non-numeric EXPECTED_MAJOR or unparsed arguments are misuse: FATAL_ERROR.
+# holds. The CUDA host leg runs only when CUDA_HOST_ID is non-empty (CUDA with a GCC host).
+# No preset enables CUDA yet, so that leg is exercised by the verdict cases; a real CUDA host runs it
+# once a CUDA preset exists. A non-numeric EXPECTED_MAJOR or unparsed arguments are misuse: FATAL_ERROR.
 function(lws_clang21_verdict out_var)
     cmake_parse_arguments(_lws_arg ""
         "C_ID;C_VERSION;CXX_ID;CXX_VERSION;CUDA_HOST_ID;CUDA_HOST_VERSION;EXPECTED_MAJOR"

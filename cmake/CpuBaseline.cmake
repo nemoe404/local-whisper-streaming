@@ -1,4 +1,4 @@
-# cmake/CpuBaseline.cmake: the one owner of the ggml x86 CPU baseline (BLD-01).
+# cmake/CpuBaseline.cmake: the one owner of the ggml x86 CPU baseline.
 #
 # Why this exists: ggml's CPU backend picks its instruction set at COMPILE time. ggml defaults
 # GGML_NATIVE ON (third_party/whisper.cpp/ggml/CMakeLists.txt:123), which compiles ggml-cpu with
@@ -7,14 +7,14 @@
 # compiles, every ISA default flips OFF instead (ggml/CMakeLists.txt:104-108), which silently builds
 # an SSE2-only binary. Hence an explicit list, pinned with CACHE ... FORCE.
 #
-# P1-D1 (planner, resolves the open baseline item): ggml CPU baseline x86-64-v3 class, SSE42 AVX AVX2
+# ggml CPU baseline x86-64-v3 class, SSE42 AVX AVX2
 # FMA F16C BMI2 ON; AVX_VNNI, the AVX512 family and AMX OFF. Why: it is the baseline consigliere ships
 # on the same fork pin (operator decision 2026-10-01, its cmake/CpuBaseline.cmake), STACK.md built
 # exactly this with clang 21 here (ggml-cpu variant line -msse4.2 -mf16c -mfma -mbmi2 -mavx -mavx2),
 # and an SSE4.2-only build would make every later throughput number unrepresentative. Sources:
 # .planning/research/STACK.md lines 83, 86, 113 and 114; .planning/research/PITFALLS.md line 221.
 # STACK.md's wording is "x86-64-v3-class": this is the ggml option set, not the full psABI x86-64-v3
-# level. Cost: no AVX2 means SIGILL on pre-Haswell x86; the README states the minimum CPU in Phase 7.
+# level. Cost: no AVX2 means SIGILL on pre-Haswell x86; the README must state the minimum CPU.
 # Reversibility: reversible now, costly after v0.1.0.
 #
 # Script-mode safe: including this file only defines variables and functions, so `cmake -P` on it

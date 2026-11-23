@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The one Conan install command. check.sh, the 01-03 measurement script and the 01-04 seed harness
+# The one Conan install command. check.sh, the measurement script and the seed harness
 # all call this script, so the command cannot drift between them.
 #
 # Takes exactly one argument, Debug or Release. Anything else exits 2.

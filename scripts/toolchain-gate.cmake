@@ -1,4 +1,4 @@
-# scripts/toolchain-gate.cmake: the toolchain gate (BLD-02, D-03, success criterion 1).
+# scripts/toolchain-gate.cmake: the toolchain gate.
 #
 #   cmake -DLWS_ROOT={root} [-DLWS_BUILD_ID={id} -DLWS_LEGS={leg}] -P scripts/toolchain-gate.cmake
 #
@@ -209,7 +209,7 @@ foreach(_tg_slot IN ITEMS a b)
             list(APPEND LWS_TG_REFUSALS "${_p} CMAKE_CXX_COMPILER is '${_v}', not ${LWS_TG_EXPECTED_CXX}")
         endif()
 
-        # The CUDA host is optional (no preset enables CUDA before Phase 5); when set it must be clang.
+        # The CUDA host is optional (no preset enables CUDA yet); when set it must be clang.
         lws_tg_resolve_field(_f _v "${_tg_name}" "cacheVariables;CMAKE_CUDA_HOST_COMPILER" 0 "${_tg_doc_a}" "${_tg_doc_b}")
         if(_f AND NOT "${_v}" STREQUAL "${LWS_TG_EXPECTED_CXX}")
             list(APPEND LWS_TG_REFUSALS

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline fail-closed proof for scripts/fetch-models.sh (BLD-05, Pitfall 10).
+# Offline fail-closed proof for scripts/fetch-models.sh.
 #
 # No arguments. Never touches the real models/ directory and never uses the network: every call of the
 # fetch script goes through run_fetch, which sets LWS_MODELS_DIR, LWS_MODELS_SHA256 and LWS_MODELS_SOURCE

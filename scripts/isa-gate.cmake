@@ -1,5 +1,4 @@
-# scripts/isa-gate.cmake: the native-ISA sweep over every leg's compile database (BLD-01, success
-# criterion 2).
+# scripts/isa-gate.cmake: the native-ISA sweep over every leg's compile database.
 #
 #   cmake -DLWS_ROOT={root} -DLWS_BUILD_ID={id} -DLWS_LEGS={leg;leg} -P scripts/isa-gate.cmake
 #

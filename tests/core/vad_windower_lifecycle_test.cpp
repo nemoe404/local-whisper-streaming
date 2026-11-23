@@ -47,7 +47,7 @@ lws::Segment ceiling_cut(lws::VadWindower& windower) {
 
 } // namespace
 
-// CORE-11, D-03, Edge 21: a force close emits the open window as is, never truncated, with the
+// A force close emits the open window as is, never truncated, with the
 // Discontinuity reason. The window was born without a notice, so the flag stays false.
 TEST(ForceClose, OpenWindowIsEmittedAsIsWithDiscontinuityAndNeverTruncated) {
     auto windower = lws::test::make_windower();
@@ -63,7 +63,7 @@ TEST(ForceClose, OpenWindowIsEmittedAsIsWithDiscontinuityAndNeverTruncated) {
     EXPECT_FALSE(windower.force_close().has_value());
 }
 
-// Edge 22, 27: the force close clears the tail, so the next window holds none of ids 1..8.
+// A force close clears the tail, so the next window holds none of ids 1..8.
 TEST(ForceClose, ClearsTheTailSoTheNextWindowHasNoPreCloseAudio) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(lws::test::feed_run(windower, 1.0F, 8, kSpeech).empty());
@@ -76,7 +76,7 @@ TEST(ForceClose, ClearsTheTailSoTheNextWindowHasNoPreCloseAudio) {
     EXPECT_EQ(emitted.front().start, 8U * kFrame);
 }
 
-// D4a, Edge 22, 23. (a) The idle clear drops the quiet pre-roll. (b) It restarts the onset streak.
+// (a) The idle clear drops the quiet pre-roll. (b) It restarts the onset streak.
 TEST(ForceClose, IdleForceCloseClearsThePreRollAndTheStreak) {
     {
         auto windower = lws::test::make_windower();
@@ -95,7 +95,7 @@ TEST(ForceClose, IdleForceCloseClearsThePreRollAndTheStreak) {
     }
 }
 
-// User answer 2: a continuation that is force closed keeps continues_previous. 438 frames give a
+// A continuation that is force closed keeps continues_previous. 438 frames give a
 // 391-frame ceiling cut and a 55-frame open remainder starting at frame 383.
 TEST(ForceClose, ContinuationForceClosedKeepsContinuesPrevious) {
     auto windower = lws::test::make_windower();
@@ -111,7 +111,7 @@ TEST(ForceClose, ContinuationForceClosedKeepsContinuesPrevious) {
     EXPECT_EQ(rest.start, 383U * kFrame);
 }
 
-// D-03, settled 2026-11-23: a window born flagged keeps the flag when a force close emits it, and
+// Settled 2026-11-23: a window born flagged keeps the flag when a force close emits it, and
 // the notice was consumed by the birth, so the next window is not flagged.
 TEST(ForceClose, OpenWindowBornFlaggedKeepsItsFlag) {
     auto windower = lws::test::make_windower();
@@ -125,7 +125,7 @@ TEST(ForceClose, OpenWindowBornFlaggedKeepsItsFlag) {
     EXPECT_FALSE(next.discontinuous_before);
 }
 
-// CORE-11, D5, Edge 25: flush emits with the Flush reason and adds no flag.
+// Flush emits with the Flush reason and adds no flag.
 TEST(Flush, OpenWindowIsEmittedWithFlushAndNoFlagAdded) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(feed_run(windower, 1.0F, 8, kSpeech).empty());
@@ -136,7 +136,7 @@ TEST(Flush, OpenWindowIsEmittedWithFlushAndNoFlagAdded) {
     EXPECT_FALSE(windower.flush().has_value());
 }
 
-// D5: the flag on a flushed window is its birth value, not a forced false.
+// The flag on a flushed window is its birth value, not a forced false.
 TEST(Flush, OpenWindowFlagIsItsBirthValueNotForcedFalse) {
     auto windower = lws::test::make_windower();
     EXPECT_FALSE(windower.notify_discontinuity().has_value());
@@ -146,7 +146,7 @@ TEST(Flush, OpenWindowFlagIsItsBirthValueNotForcedFalse) {
     EXPECT_TRUE(closed.discontinuous_before);
 }
 
-// Edge 26, D5b, Q1: flush with no window returns nothing and restarts the onset streak.
+// Flush with no window returns nothing and restarts the onset streak.
 TEST(Flush, WithNoWindowReturnsNothingAndResetsTheOnsetStreak) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(feed_run(windower, 1.0F, 7, kSpeech).empty());
@@ -155,7 +155,7 @@ TEST(Flush, WithNoWindowReturnsNothingAndResetsTheOnsetStreak) {
     EXPECT_TRUE(feed_run(windower, 9.0F, 22, kQuiet).empty());
 }
 
-// D5b: the idle flush drops the quiet pre-roll. On an open window the tail is already empty, so
+// The idle flush drops the quiet pre-roll. On an open window the tail is already empty, so
 // this idle case is the one that proves the clear.
 TEST(Flush, IdleFlushClearsThePreRoll) {
     auto windower = lws::test::make_windower();
@@ -166,7 +166,7 @@ TEST(Flush, IdleFlushClearsThePreRoll) {
     EXPECT_EQ(frame_count(seg), 29U);
 }
 
-// D-03, Edge 20: a notice raised in silence flags the nearest window born after it, and only that
+// A notice raised in silence flags the nearest window born after it, and only that
 // one.
 TEST(Notice, NotifyDuringSilenceFlagsOnlyTheNearestFollowingWindow) {
     auto windower = lws::test::make_windower();
@@ -176,7 +176,7 @@ TEST(Notice, NotifyDuringSilenceFlagsOnlyTheNearestFollowingWindow) {
     EXPECT_FALSE(sole(utterance(windower, 34.0F)).discontinuous_before);
 }
 
-// D-05, user answer 3, Edge 20: a notice closes the open window now; the flag lands on the next
+// A notice closes the open window now; the flag lands on the next
 // one.
 TEST(Notice, NotifyDuringAnOpenWindowClosesItAndFlagsTheWindowAfterIt) {
     auto windower = lws::test::make_windower();
@@ -189,7 +189,7 @@ TEST(Notice, NotifyDuringAnOpenWindowClosesItAndFlagsTheWindowAfterIt) {
     EXPECT_TRUE(sole(utterance(windower, 31.0F)).discontinuous_before);
 }
 
-// D-05, user answer 3: the open window is emitted as is, never truncated, with its birth flags
+// The open window is emitted as is, never truncated, with its birth flags
 // kept.
 TEST(Notice, OpenWindowIsEmittedWithDiscontinuityAndBirthFlagsKept) {
     {
@@ -215,7 +215,7 @@ TEST(Notice, OpenWindowIsEmittedWithDiscontinuityAndBirthFlagsKept) {
     }
 }
 
-// D-05, D-02: a continuation closed by a notice keeps continues_previous.
+// A continuation closed by a notice keeps continues_previous.
 TEST(Notice, ContinuationClosedByNotifyKeepsContinuesPrevious) {
     auto windower = lws::test::make_windower();
     EXPECT_EQ(frame_count(ceiling_cut(windower)), kCutFrames);
@@ -227,7 +227,7 @@ TEST(Notice, ContinuationClosedByNotifyKeepsContinuesPrevious) {
     EXPECT_EQ(rest.start, 383U * kFrame);
 }
 
-// CORE-11, D-05: an idle notify returns nothing and stays armed.
+// An idle notify returns nothing and stays armed.
 TEST(Notice, IdleNotifyReturnsNullopt) {
     auto windower = lws::test::make_windower();
     EXPECT_FALSE(windower.notify_discontinuity().has_value());
@@ -236,7 +236,7 @@ TEST(Notice, IdleNotifyReturnsNullopt) {
     EXPECT_TRUE(sole(utterance(windower, 23.0F)).discontinuous_before);
 }
 
-// D-03, D-02, T-02-11: the window born after a notify is flagged and is not a continuation.
+// The window born after a notify is flagged and is not a continuation.
 TEST(Notice, WindowAfterNotifyIsFlaggedAndNotContinued) {
     {
         auto windower = lws::test::make_windower();
@@ -259,7 +259,7 @@ TEST(Notice, WindowAfterNotifyIsFlaggedAndNotContinued) {
     }
 }
 
-// D-05: the notify clears the hangover counter. A counter left at 10 would close the next window
+// The notify clears the hangover counter. A counter left at 10 would close the next window
 // early with 19 frames.
 TEST(Notice, NotifyClearsTheHangoverCounter) {
     auto windower = lws::test::make_windower();
@@ -271,7 +271,7 @@ TEST(Notice, NotifyClearsTheHangoverCounter) {
     EXPECT_TRUE(seg.discontinuous_before);
 }
 
-// D-05: the notify clears the probability history. A history left at 18 entries would cut 18 frames
+// The notify clears the probability history. A history left at 18 entries would cut 18 frames
 // early.
 TEST(Notice, NotifyClearsTheProbabilityHistory) {
     auto windower = lws::test::make_windower();
@@ -287,7 +287,7 @@ TEST(Notice, NotifyClearsTheProbabilityHistory) {
     EXPECT_FALSE(cut.continues_previous);
 }
 
-// D4c, Edge 24, Pitfall 5: a force close with no window keeps the pending notice.
+// A force close with no window keeps the pending notice.
 TEST(Notice, ForceCloseKeepsThePendingNotice) {
     auto windower = lws::test::make_windower();
     EXPECT_FALSE(windower.notify_discontinuity().has_value());
@@ -295,7 +295,7 @@ TEST(Notice, ForceCloseKeepsThePendingNotice) {
     EXPECT_TRUE(sole(utterance(windower, 1.0F)).discontinuous_before);
 }
 
-// D5: a flush with no window keeps the pending notice.
+// A flush with no window keeps the pending notice.
 TEST(Notice, FlushKeepsThePendingNotice) {
     auto windower = lws::test::make_windower();
     EXPECT_FALSE(windower.notify_discontinuity().has_value());
@@ -303,7 +303,7 @@ TEST(Notice, FlushKeepsThePendingNotice) {
     EXPECT_TRUE(sole(utterance(windower, 1.0F)).discontinuous_before);
 }
 
-// D-05, idempotent: (a) idle, (b) open. Both leave one flag, consumed by one window.
+// Idempotent: (a) idle, (b) open. Both leave one flag, consumed by one window.
 TEST(Notice, RepeatedNotifyIsOneFlag) {
     {
         auto windower = lws::test::make_windower();
@@ -322,7 +322,7 @@ TEST(Notice, RepeatedNotifyIsOneFlag) {
     }
 }
 
-// D-05: the notify restarts the onset streak (a) and drops the quiet pre-roll (b).
+// The notify restarts the onset streak (a) and drops the quiet pre-roll (b).
 TEST(Notice, NotifyClearsThePreRollAndTheOnsetStreak) {
     {
         auto windower = lws::test::make_windower();
@@ -341,7 +341,7 @@ TEST(Notice, NotifyClearsThePreRollAndTheOnsetStreak) {
     }
 }
 
-// D4c: after a notify closed the window, a force close finds nothing and keeps the notice.
+// After a notify closed the window, a force close finds nothing and keeps the notice.
 TEST(Notice, ForceCloseAfterNotifyEmitsNothingAndKeepsTheNotice) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(feed_run(windower, 1.0F, 8, kSpeech).empty());
@@ -352,7 +352,7 @@ TEST(Notice, ForceCloseAfterNotifyEmitsNothingAndKeepsTheNotice) {
     EXPECT_TRUE(sole(utterance(windower, 9.0F)).discontinuous_before);
 }
 
-// D5: after a notify closed the window, a flush finds nothing and keeps the notice.
+// After a notify closed the window, a flush finds nothing and keeps the notice.
 TEST(Notice, FlushAfterNotifyEmitsNothingAndKeepsTheNotice) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(feed_run(windower, 1.0F, 8, kSpeech).empty());
@@ -361,7 +361,7 @@ TEST(Notice, FlushAfterNotifyEmitsNothingAndKeepsTheNotice) {
     EXPECT_TRUE(sole(utterance(windower, 9.0F)).discontinuous_before);
 }
 
-// User answer 2, D-03: a ceiling remainder never carries the flag, although the cut part does when
+// A ceiling remainder never carries the flag, although the cut part does when
 // its window was born after a notice.
 TEST(CeilingRemainder, NeverCarriesTheDiscontinuityFlag) {
     auto windower = lws::test::make_windower();
@@ -377,7 +377,7 @@ TEST(CeilingRemainder, NeverCarriesTheDiscontinuityFlag) {
     EXPECT_EQ(frame_count(rest), kRemainderFrames + 21U);
 }
 
-// T-02-11, the leak test: a window born after a continuation is not itself a continuation.
+// The leak test: a window born after a continuation is not itself a continuation.
 TEST(Latch, NewWindowAfterAContinuationIsNotContinued) {
     auto windower = lws::test::make_windower();
     EXPECT_EQ(frame_count(ceiling_cut(windower)), kCutFrames);

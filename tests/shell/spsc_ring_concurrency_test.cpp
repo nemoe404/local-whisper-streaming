@@ -114,7 +114,7 @@ void record_snapshot(SnapshotTally& tally, const lws::RingCounters& previous,
 
 } // namespace
 
-// RING-04, success criterion 1: one producer and one consumer move two million samples through a
+// One producer and one consumer move two million samples through a
 // small ring in order and bit for bit. The consumer calls nothing but pop and stops on a count: a
 // completion flag or a counters() call would add a happens-before edge from the producer and could
 // hide a weakened release store. Worker threads call no gtest macro: GoogleTest is not
@@ -152,7 +152,7 @@ TEST(SpscRingConcurrency, LosslessStreamArrivesInOrderBitExact) {
     EXPECT_EQ(counters.accepted + counters.dropped, counters.offered);
 }
 
-// RING-01, RING-02 under concurrency: the producer never retries. The consumer is held on a latch
+// Under concurrency: the producer never retries. The consumer is held on a latch
 // until the producer has offered 200 spans, so overruns are certain. Whatever it then receives is
 // exactly the concatenation of the accepted spans, and the counters match the producer's own log.
 TEST(SpscRingConcurrency, LossyStreamDeliversExactlyTheAcceptedSpans) {
@@ -193,7 +193,7 @@ TEST(SpscRingConcurrency, LossyStreamDeliversExactlyTheAcceptedSpans) {
     expect_counters_match_log(ring.counters(), log);
 }
 
-// RING-02 under concurrency: a consumer that sees the flag set always finds a non-zero dropped
+// Under concurrency: a consumer that sees the flag set always finds a non-zero dropped
 // count, because the producer stores the count before it sets the flag.
 TEST(SpscRingConcurrency, FlagSeenByConsumerImpliesDroppedSamples) {
     constexpr std::size_t kTotal = 600'000;
@@ -232,7 +232,7 @@ TEST(SpscRingConcurrency, FlagSeenByConsumerImpliesDroppedSamples) {
     EXPECT_GE(flags_seen + static_cast<std::uint64_t>(still_pending), 1U);
 }
 
-// RING-02, research probe P9: a monitor thread reading counters() while the producer overruns and
+// A monitor thread reads counters while the producer overruns and
 // the consumer pops never sees a snapshot that over-counts or goes backwards.
 TEST(SpscRingConcurrency, CounterSnapshotsNeverOvercount) {
     constexpr std::size_t kTotal = 500'000;

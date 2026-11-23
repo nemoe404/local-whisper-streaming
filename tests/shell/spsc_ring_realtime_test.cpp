@@ -101,7 +101,8 @@ const int g_hooks_installed = __sanitizer_install_malloc_and_free_hooks(on_mallo
 // Replacement allocation functions: guard, then forward to the C allocator.
 // NOLINTBEGIN(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,misc-new-delete-overloads,misc-const-correctness)
 // Reason: the global operator new replacement has to forward to the C allocator.
-// This is an allocation counter for the real-time check (push must not allocate), not manual memory management.
+// This is an allocation counter for the real-time check (push must not allocate), not manual memory
+// management.
 void* operator new(std::size_t size) {
     on_allocation();
     void* ptr = std::malloc(size != 0 ? size : 1);
@@ -123,7 +124,7 @@ namespace {
 static_assert(noexcept(std::declval<lws::SpscRing&>().push(std::declval<std::span<const float>>())),
               "the capture callback calls push: it must be noexcept");
 
-// Non-vacuity (Pitfall 6): the guard must see an allocation, on every leg.
+// Non-vacuity: the guard must see an allocation, on every leg.
 TEST(SpscRingRealTime, AllocationProbeCountsAnEscapedAllocation) {
 #ifdef LWS_RT_MALLOC_HOOK
     EXPECT_NE(g_hooks_installed, 0);
@@ -136,7 +137,7 @@ TEST(SpscRingRealTime, AllocationProbeCountsAnEscapedAllocation) {
     EXPECT_GE(g_allocations.load(std::memory_order_relaxed), 1U);
 }
 
-// RING-01, success criterion 3: accepted, straddling and overrun pushes allocate nothing. Abort
+// Accepted, straddling and overrun pushes allocate nothing. Abort
 // mode is armed around the loop; no gtest macro runs and no container grows while it is armed.
 TEST(SpscRingRealTime, PushNeverAllocatesOnAcceptStraddleOrOverrun) {
     constexpr std::size_t kCapacity = 1000;
@@ -173,7 +174,7 @@ TEST(SpscRingRealTime, PushNeverAllocatesOnAcceptStraddleOrOverrun) {
     EXPECT_GT(accepted_samples, kCapacity); // the copies wrapped
 }
 
-// Success criterion 3, never blocks: the consumer is parked on a latch and never pops, so a
+// Never blocks: the consumer is parked on a latch and never pops, so a
 // blocking push would never return.
 TEST(SpscRingRealTime, PushFinishesAgainstAStalledConsumer) {
     constexpr std::size_t kCapacity = 1024;

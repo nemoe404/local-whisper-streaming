@@ -1,4 +1,4 @@
-# scripts/sanitizer-gate.cmake: the instrumented-leg gate (BLD-04, success criterion 3).
+# scripts/sanitizer-gate.cmake: the instrumented-leg gate.
 #
 #   cmake -DLWS_ROOT={root} -DLWS_BUILD_ID={id} -DLWS_LEGS={leg;leg} -P scripts/sanitizer-gate.cmake
 #

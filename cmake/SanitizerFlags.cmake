@@ -38,7 +38,7 @@ endfunction()
 # ggml_fp16_t * parameters. That is a function-type mismatch inside the fork (call site and callee both in
 # ggml), ABI-identical, and with -fno-sanitize-recover=all it aborts every model-backed run. The fix belongs
 # in the fork (a commit on the consigliere-v1.9.5 branch); until then this is the narrowest switch: one
-# check, one subtree, no suppression file. Recorded in the 01-03 summary as a deviation.
+# check, one subtree, no suppression file.
 function(lws_sanitizer_whisper_extras sanitizer out_compile)
     if("${sanitizer}" STREQUAL "asan-ubsan")
         set(${out_compile} "-fno-sanitize=function" PARENT_SCOPE)

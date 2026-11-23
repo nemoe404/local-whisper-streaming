@@ -1,5 +1,4 @@
-# scripts/core-isolation-gate.cmake: the pure-core isolation gate (ROADMAP success criterion 5, GATE-02
-# companion, T-02-10).
+# scripts/core-isolation-gate.cmake: the pure-core isolation gate, with its link-closure companion.
 #
 #   cmake -DLWS_ROOT={root} [-DLWS_CLOSURE_FILE={path}] -P scripts/core-isolation-gate.cmake
 #

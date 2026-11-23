@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tests/gates/skip_red.sh: proof that scripts/check.sh fails a leg whose ctest run skipped a test
-# (GATE-01: a skip is never a pass). No arguments.
+# (a skip is never a pass). No arguments.
 #
 # GTEST_SKIP exits 0, and ctest exits 0 on a skipped test, so the rule lives in check.sh's count of
 # `***Skipped` lines and not in ctest's exit status. This proof therefore drives check.sh itself, the whole

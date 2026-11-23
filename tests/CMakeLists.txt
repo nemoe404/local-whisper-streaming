@@ -12,13 +12,13 @@ foreach(_src IN LISTS LWS_SMOKE_TESTS)
     add_executable(smoke_${_stem} ${_src})
     target_link_libraries(smoke_${_stem} PRIVATE lws_smoke lws_warnings lws_sanitizers GTest::gtest_main)
     if(_stem STREQUAL "silero_smoke_test")
-        # The test calls whisper_vad_* directly and loads the model scripts/fetch-models.sh writes (D-05).
+        # The test calls whisper_vad_* directly and loads the model scripts/fetch-models.sh writes.
         target_link_libraries(smoke_${_stem} PRIVATE whisper)
         target_compile_definitions(smoke_${_stem} PRIVATE
             LWS_SILERO_MODEL_PATH="${PROJECT_SOURCE_DIR}/models/ggml-silero-v5.1.2.bin")
-        # SileroSmoke is the success-criterion-3 smoke test (label smoke, never filtered). SileroSmokeMt
+        # SileroSmoke is the smoke test that runs on every sanitizer leg (label smoke, never filtered). SileroSmokeMt
         # runs ggml's thread pool and carries label ggml-mt, which the tsan scope rule filters. Label
-        # real-model is reserved for multi-frame model-backed tests; no Phase 1 test carries it.
+        # real-model is reserved for multi-frame model-backed tests; no test carries it yet.
         gtest_discover_tests(smoke_${_stem}
             DISCOVERY_MODE PRE_TEST
             TEST_FILTER "SileroSmoke.*"
@@ -65,7 +65,7 @@ foreach(_src IN LISTS LWS_SHELL_TESTS)
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
 endforeach()
 
-# Link closure of lws_core (SC5, T-02-10). A breadth-first walk over LINK_LIBRARIES and
+# Link closure of lws_core. A breadth-first walk over LINK_LIBRARIES and
 # INTERFACE_LINK_LIBRARIES writes every name it meets, sorted, one per line, to the build tree;
 # scripts/core-isolation-gate.cmake reads it in the core_link_closure test and refuses a whisper, ggml,
 # spdlog or thread name. The walk is deferred to the end of this directory's configure step, so a

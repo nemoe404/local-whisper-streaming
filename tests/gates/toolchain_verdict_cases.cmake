@@ -1,4 +1,4 @@
-# tests/gates/toolchain_verdict_cases.cmake: script-mode rows for lws_clang21_verdict (BLD-02, D-03).
+# tests/gates/toolchain_verdict_cases.cmake: script-mode rows for lws_clang21_verdict.
 #
 #   cmake -DLWS_ROOT={root} -P tests/gates/toolchain_verdict_cases.cmake
 #
@@ -57,7 +57,7 @@ lws_vc_row("version 21 without a dot refused" "[toolchain][c]" Clang 21 Clang 21
 lws_vc_row("major 210 refused (exact major match)" "[toolchain][c]" Clang 210.0.0 Clang 21.1.8 "" "")
 lws_vc_row("GNU C and GNU CXX both refused" "[toolchain][c];[toolchain][cxx]" GNU 15.2.0 GNU 15.2.0 "" "")
 
-# The CUDA host leg (D-03: CUDA configured with a GCC host).
+# The CUDA host leg (CUDA configured with a GCC host).
 lws_vc_row("CUDA host GNU 13.4.0 refused" "[toolchain][cuda-host]" Clang 21.1.8 Clang 21.1.8 GNU 13.4.0)
 lws_vc_row("CUDA host clang 20 refused" "[toolchain][cuda-host]" Clang 21.1.8 Clang 21.1.8 Clang 20.1.8)
 

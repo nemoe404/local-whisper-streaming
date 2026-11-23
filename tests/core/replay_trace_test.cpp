@@ -57,7 +57,7 @@ bool same(const lws::Segment& a, const lws::Segment& b) {
 
 } // namespace
 
-// ROADMAP SC1, SC3: a pause longer than the hangover gives two Hangover segments, each with its own
+// A pause longer than the hangover gives two Hangover segments, each with its own
 // pre-roll. seg1 is 10 pre-roll + 40 speech + 21 trailing = 71 frames, from id 11. seg2 is 10
 // pre-roll (quiet ids 96..105, kept by the tail after the closing frame id 82) + 60 speech + 21
 // trailing = 91 frames, from id 96.
@@ -77,7 +77,7 @@ TEST(ReplayTwoUtterances, PauseSeparatesTwoHangoverSegmentsWithTheRightPreRoll) 
     EXPECT_FLOAT_EQ(frame_id(seg2, 0), 96.0F);
 }
 
-// CORE-04: a 5-frame dip inside an utterance is shorter than the hangover, so it stays one segment.
+// A 5-frame dip inside an utterance is shorter than the hangover, so it stays one segment.
 // 8 speech + 5 dip + 8 speech = 21 frames, then 21 trailing; the 22nd closes and is out.
 TEST(ReplayDip, ShortGapInsideAnUtteranceStaysOneSegment) {
     auto windower = lws::test::make_windower();
@@ -88,7 +88,7 @@ TEST(ReplayDip, ShortGapInsideAnUtteranceStaysOneSegment) {
     EXPECT_FLOAT_EQ(frame_id(seg, 0), 1.0F);
 }
 
-// D-02, D5: 440 frames of speech cut once at the ceiling; flush emits the 57-frame continuation
+// 440 frames of speech cut once at the ceiling; flush emits the 57-frame continuation
 // (440 - 383) with the flag kept and no discontinuity.
 TEST(ReplayCeilingThenFlush, ContinuationEndsWithFlushAndKeepsTheFlag) {
     auto windower = lws::test::make_windower();
@@ -104,7 +104,7 @@ TEST(ReplayCeilingThenFlush, ContinuationEndsWithFlushAndKeepsTheFlag) {
     EXPECT_EQ(rest.start, 383U * kFrame);
 }
 
-// D-05, T-02-05: after a force close the resumed utterance holds none of the closed audio.
+// After a force close the resumed utterance holds none of the closed audio.
 TEST(ReplayForceCloseThenResume, ResumedUtteranceHasNoPreCloseAudio) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(feed_run(windower, 1.0F, 8, kSpeech).empty());
@@ -119,7 +119,7 @@ TEST(ReplayForceCloseThenResume, ResumedUtteranceHasNoPreCloseAudio) {
     EXPECT_EQ(seg.start, 8U * kFrame);
 }
 
-// D-05, user answer 3, T-02-05: the same trace with a notify. The open window closes at the gap and
+// The same trace with a notify. The open window closes at the gap and
 // the flag lands on the resumed window instead.
 TEST(ReplayNotifyThenResume, GapClosesTheOpenWindowAndFlagsTheNextOne) {
     auto windower = lws::test::make_windower();
@@ -137,7 +137,7 @@ TEST(ReplayNotifyThenResume, GapClosesTheOpenWindowAndFlagsTheNextOne) {
     EXPECT_EQ(seg.start, 8U * kFrame);
 }
 
-// ROADMAP SC1: the same trace through two fresh windowers gives identical segments.
+// The same trace through two fresh windowers gives identical segments.
 TEST(ReplayDeterminism, SameTraceGivesIdenticalSegments) {
     auto first = lws::test::make_windower();
     auto second = lws::test::make_windower();

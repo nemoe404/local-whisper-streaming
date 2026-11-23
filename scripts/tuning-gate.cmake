@@ -1,8 +1,8 @@
-# scripts/tuning-gate.cmake: the tuning-values gate (GATE-02, success criterion 4).
+# scripts/tuning-gate.cmake: the tuning-values gate.
 #
 #   cmake -DLWS_ROOT={root} -P scripts/tuning-gate.cmake
 #
-# Tuning values stay out of constexpr until a measured protocol commits them (D-14). The gate reads
+# Tuning values stay out of constexpr until a measured protocol commits them. The gate reads
 # every header under include/lws as text and refuses a line that holds both the constexpr keyword and
 # a tuning identifier. Each line is lowercased before the match, so a camel-case name such as the
 # seeded ones is caught as well; the refusal prints the line as written. Nothing is compiled.
