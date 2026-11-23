@@ -4,8 +4,8 @@ Real-time speech-to-text on a live audio stream with [whisper.cpp](https://githu
 A lock-free ring buffer takes audio in, a Silero voice-activity detector decides which parts are speech,
 and only those parts reach Whisper. Silence costs (almost) nothing.
 
-> **Status: pre-alpha.** The pure core, the lock-free ring and the VAD engine are implemented and tested.
-> Segmentation on recorded audio is in progress; the decoder, the streaming API and the CLI are not started.
+> **Status: pre-alpha.** The pure core, the lock-free ring, the VAD engine and segmentation on recorded audio
+> are implemented and tested. The decoder, the streaming API and the CLI are not started.
 > See [Roadmap](#roadmap).
 
 ## Why
@@ -30,6 +30,10 @@ audio in ──► ring buffer ──► VAD (Silero, whisper.cpp) ──► spe
   does not allocate, does not block and contains no compare-and-swap.
 - **VAD engine** (`src/shell`): Silero through whisper.cpp's `whisper_vad_*` API only, with a startup
   frame-size probe, CPU and one thread, and whisper's log routed away from stderr.
+- **Segmentation** (`src/shell`): exact 512-sample frames, a segmenter that force-closes the open window when
+  detection fails, and a pre-roll that keeps a quiet word onset intact (measured lead-in of 320 ms on recorded
+  audio). The n_context difference between whisper.cpp's per-frame probabilities and the reference Silero is
+  measured and accepted: maximum difference 0.20 on one frame, mean 0.002, no segment boundary shift.
 
 Errors are returned as `std::expected`; no exceptions cross the public API.
 
@@ -81,7 +85,7 @@ anyone who needs real-time Whisper without the rest.
 
 1. [x] Pure core: options, ring index, VAD windower, seam merge, replayed on plain values.
 2. [x] Lock-free SPSC ring with counters, discontinuity flag and a ThreadSanitizer proof.
-3. [ ] VAD on recorded audio: segments with word onsets intact, golden boundaries, chunking invariance.
+3. [x] VAD on recorded audio: segments with word onsets intact, golden boundaries, chunking invariance.
 4. [ ] Whisper shell: model loading, per-segment decode, worker thread, timed text events.
 5. [ ] Public streamer API and a `lws-cli` that reads raw PCM from stdin
    (so `pwcap <app> | lws-cli` works).
