@@ -35,4 +35,6 @@ std::expected<Options, Error> validate(const Options& options) {
     return options;
 }
 
+bool seam_merge_enabled(const Options& options) noexcept { return options.overlap_ms > 0; }
+
 } // namespace lws

@@ -40,6 +40,10 @@ struct Options {
 // Returns the options unchanged when they hold, or the first violated rule (CORE-10).
 [[nodiscard]] std::expected<Options, Error> validate(const Options& options);
 
+// Overlap and seam merge go together (Q2): an overlap means the next window repeats words that
+// seam_merge removes, and no overlap means there is nothing to merge. Not constexpr on purpose.
+[[nodiscard]] bool seam_merge_enabled(const Options& options) noexcept;
+
 // ceil(ms / 32) in 64-bit (D-15). A required duration clamps to at least one frame at its point of
 // use.
 [[nodiscard]] constexpr std::uint64_t ms_to_frames_ceil(std::uint64_t ms) noexcept {

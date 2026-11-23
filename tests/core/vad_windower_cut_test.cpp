@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <initializer_list>
+#include <limits>
 #include <span>
 #include <utility>
 #include <vector>
@@ -166,3 +167,66 @@ TEST(CutOverlapRule, CutAtFrameThreeLeavesARemainderThatStartsAtFrameOne) {
     EXPECT_EQ(second.front().start, 1U * lws::kVadFrameSamples);
     EXPECT_FLOAT_EQ(lws::test::frame_id(second.front(), 0), 1.0F);
 }
+
+// CORE-06, D-08, D6: overlap_ms = 0 starts the remainder at the cut and turns the seam-merge query
+// off. continues_previous still holds, because the remainder is still the continuation.
+TEST(OverlapZero, DisablesTheOverlapAndTheSeamMergeQuery) {
+    lws::Options options;
+    options.overlap_ms = 0;
+    auto windower = lws::test::make_windower(options);
+    const auto trace = speech_trace(438, {{400, 0.55F}});
+    const auto cut = feed_trace(windower, trace);
+    ASSERT_EQ(cut.size(), 1U);
+    EXPECT_EQ(lws::test::frame_count(cut.front()), 400U);
+    EXPECT_TRUE(lws::test::feed_run(windower, 438.0F, 21, kQuiet).empty());
+    const auto closed = lws::test::feed_run(windower, 459.0F, 1, kQuiet);
+    ASSERT_EQ(closed.size(), 1U);
+    const lws::Segment& second = closed.front();
+    EXPECT_EQ(second.start, 400U * lws::kVadFrameSamples);
+    EXPECT_FLOAT_EQ(lws::test::frame_id(second, 0), 400.0F);
+    EXPECT_TRUE(second.continues_previous);
+    EXPECT_FALSE(lws::seam_merge_enabled(options));
+    EXPECT_TRUE(lws::seam_merge_enabled(lws::Options{}));
+}
+
+// CORE-08, D-02: three ceiling cuts in a row (at 438, 821 and 1204 frames fed). Only the first
+// segment is born outside a continuation; every later one continues the previous.
+TEST(ContinuationChain, ARemainderThatIsCutAgainKeepsContinuesPrevious) {
+    auto windower = lws::test::make_windower();
+    const auto emitted = lws::test::feed_run(windower, 0.0F, std::size_t{438} * 3, kSpeech);
+    ASSERT_GE(emitted.size(), 3U);
+    EXPECT_FALSE(emitted[0].continues_previous);
+    EXPECT_TRUE(emitted[1].continues_previous);
+    EXPECT_EQ(emitted[1].reason, lws::CloseReason::Ceiling);
+    EXPECT_TRUE(std::ranges::all_of(std::span(emitted).subspan(1), [](const lws::Segment& segment) {
+        return segment.continues_previous;
+    }));
+}
+
+// T-02-04: the window never grows past the ceiling. This pins bounded memory, not a cut rate: with
+// flat probabilities a 19-frame ceiling cuts after nearly every frame (open question Q9, accepted).
+TEST(BoundedShortCeiling, SteadySpeechWithNineteenFrameCeilingNeverGrowsPastTheCeiling) {
+    auto windower = lws::test::make_windower(short_ceiling_options());
+    const auto emitted = lws::test::feed_run(windower, 0.0F, 300, kSpeech);
+    EXPECT_GE(emitted.size(), 10U);
+    EXPECT_TRUE(std::ranges::all_of(emitted, [](const lws::Segment& segment) {
+        return lws::test::frame_count(segment) <= 19U &&
+               segment.reason == lws::CloseReason::Ceiling;
+    }));
+}
+
+#ifdef NDEBUG
+// D11b: a NaN probability is stored as 0.0F in the cut history, so the cut picks it. The frame is
+// still sub-threshold. Release only: Debug builds trip the range assert in feed() first. A NaN left
+// in the history would never be picked by min_element, so this pins the 0.0F rule.
+TEST(NaNHistory, NaNProbabilityIsStoredAsZeroSoTheCutPicksIt) {
+    auto windower = lws::test::make_windower(short_ceiling_options());
+    EXPECT_TRUE(lws::test::feed_run(windower, 0.0F, 12, kSpeech).empty());
+    EXPECT_TRUE(
+        lws::test::feed_run(windower, 12.0F, 1, std::numeric_limits<float>::quiet_NaN()).empty());
+    const auto emitted = lws::test::feed_run(windower, 13.0F, 6, kSpeech);
+    ASSERT_EQ(emitted.size(), 1U);
+    EXPECT_EQ(emitted.front().reason, lws::CloseReason::Ceiling);
+    EXPECT_EQ(lws::test::frame_count(emitted.front()), 12U);
+}
+#endif
