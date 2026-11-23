@@ -51,6 +51,20 @@ foreach(_src IN LISTS LWS_CORE_TESTS)
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
 endforeach()
 
+# Shell tests: one executable per file, linked against lws_core. One executable per file is required
+# because a later test file replaces the global allocation functions, which must not touch the others.
+# No Threads::Threads link: std::jthread links without it (tests/gates/seeds/tsan_race.cpp).
+file(GLOB LWS_SHELL_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/shell/*_test.cpp)
+foreach(_src IN LISTS LWS_SHELL_TESTS)
+    get_filename_component(_stem ${_src} NAME_WE)
+    add_executable(shell_${_stem} ${_src})
+    target_link_libraries(shell_${_stem} PRIVATE lws_core lws_warnings lws_sanitizers GTest::gtest_main)
+    gtest_discover_tests(shell_${_stem}
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES LABELS shell TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
+endforeach()
+
 # Link closure of lws_core (SC5, T-02-10). A breadth-first walk over LINK_LIBRARIES and
 # INTERFACE_LINK_LIBRARIES writes every name it meets, sorted, one per line, to the build tree;
 # scripts/core-isolation-gate.cmake reads it in the core_link_closure test and refuses a whisper, ggml,
