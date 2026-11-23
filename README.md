@@ -1,5 +1,7 @@
 # local-whisper-streaming
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C.svg)](CMakeLists.txt) [![clang 21](https://img.shields.io/badge/clang-21-262D3A.svg)](CMakePresets.json) [![Linux](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](README.md#build) [![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#roadmap)
+
 Real-time speech-to-text on a live audio stream with [whisper.cpp](https://github.com/ggml-org/whisper.cpp).
 A lock-free ring buffer takes audio in, a Silero voice-activity detector decides which parts are speech,
 and only those parts reach Whisper. Silence costs (almost) nothing.
