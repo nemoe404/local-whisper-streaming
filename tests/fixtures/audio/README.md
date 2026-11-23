@@ -26,3 +26,18 @@ context; the reference prepends the previous 64 samples. Over the 336 frames the
 lies within a frame of a reference edge. The decision is accept: the fork is unchanged. The reflect-context companion
 `clean_en_sample.silero-ref-reflect.txt` (same generator, `--context reflect`) agrees with the fork to 0.0006, which
 attributes the difference to the left context alone. `VadReferenceModel.AcceptedBoundsHold` pins the decision.
+
+## clean_en_sample.golden.txt
+
+- Golden segment boundaries for a two-copy stream: `clean_en_sample.wav`, 64 frames of zeros (32768 samples, 2.048 s),
+  `clean_en_sample.wav` again, 64 frames of zeros; 410176 samples in all. The second copy starts at sample 205088, which
+  is not on the 512-sample frame grid, so the stream also carries a partial frame across real audio.
+- Produced by `SegmentationModel.GoldenBoundaries`: `VadEngine::open` on Silero v5.1.2, `Segmenter` with default
+  `Options`, the stream pushed in 512-sample chunks, then flush. One line per segment: start sample, sample count, close
+  reason, `continues_previous`, `discontinuous_before`. The header names the model and fork versions it was made with.
+- It is a characterization record made by the code under test: it pins today's result against regressions and anchors
+  the chunk-size comparison. Correctness is not read from it. `SegmentationModel.SegmentsCoverReferenceSpeechAndSkipSilence`
+  checks the same segments against `clean_en_sample.silero-ref.txt`, made by the ONNX model, which the code under test
+  did not produce: each copy's reference speech span is covered and the silence between and after the copies is not.
+- Regenerate it only after a deliberate change to the engine, the fork or the windower: run the golden test, read the
+  computed lines it prints, confirm the cover test still passes, then replace the data lines and update the header.

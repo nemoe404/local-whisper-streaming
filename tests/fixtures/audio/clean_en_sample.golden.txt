@@ -1,0 +1,5 @@
+# lws golden segmentation: clean_en_sample.wav, 2.048 s zeros, clean_en_sample.wav, 2.048 s zeros (410176 samples)
+# Options defaults; fed in 512-sample chunks; Silero v5.1.2 ggml 29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf; whisper.cpp fork 0d0f7531e7e1fd6a33fba0bb706212adf27c2551
+# start_sample sample_count reason continues_previous discontinuous_before
+1024 178176 Hangover 0 0
+206336 178176 Hangover 0 0
