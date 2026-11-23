@@ -42,6 +42,12 @@ public:
     // are dropped and the partial frame is kept. Never resets.
     [[nodiscard]] std::expected<ScoredFrames, Error> feed(std::span<const float> samples);
 
+    // The ring's discontinuity flag was taken: samples were lost. Resets the model state once and
+    // drops the partial frame, so audio from before the gap is never spliced onto audio after it.
+    void notify_overrun();
+    // The source relinked: the stream continues from a different origin. Same effect as an overrun.
+    void notify_relink();
+
     // Buffered samples; always fewer than kVadFrameSamples between calls.
     [[nodiscard]] std::size_t pending() const noexcept;
 

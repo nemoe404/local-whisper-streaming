@@ -244,3 +244,105 @@ TEST(ChunkReaderFrames, FrameViewIsOneFrameAtItsOffset) {
         std::ranges::to<std::vector>();
     EXPECT_TRUE(failures.empty());
 }
+
+namespace {
+
+using ResetEvent = void (lws::ChunkReader::*)();
+
+bool fed_ok(lws::ChunkReader& reader, std::size_t count) {
+    return reader.feed(std::vector<float>(count, 0.25F)).has_value();
+}
+
+// What a reset event did to a reader that held a partial frame, and what the next whole frame cost.
+struct ResetOutcome {
+    bool fed = false;
+    std::size_t resets_before_event = 0;
+    std::size_t pending_before_event = 0;
+    std::size_t resets_after_event = 0;
+    std::size_t pending_after_event = 0;
+    std::vector<std::size_t> detect_sizes; // after the two probe calls
+
+    friend bool operator==(const ResetOutcome&, const ResetOutcome&) = default;
+};
+
+ResetOutcome partial_frame_then_event(ResetEvent event) {
+    ResetOutcome outcome;
+    FakeVadLog log;
+    auto reader = lws::ChunkReader::create(lws::test::fake_engine(log, kFrame));
+    if (!reader) {
+        return outcome;
+    }
+    const bool first_fed = fed_ok(*reader, 700); // one frame, 188 samples left over
+    outcome.resets_before_event = lws::test::resets(log);
+    outcome.pending_before_event = reader->pending();
+    (*reader.*event)();
+    outcome.resets_after_event = lws::test::resets(log);
+    outcome.pending_after_event = reader->pending();
+    const bool second_fed = fed_ok(*reader, kFrame);
+    outcome.detect_sizes =
+        lws::test::detect_sizes(log) | std::views::drop(2) | std::ranges::to<std::vector>();
+    outcome.fed = first_fed && second_fed;
+    return outcome;
+}
+
+// The partial frame's 188 samples must not be spliced in front of the 512 that follow the event, so
+// the second detect call is exactly one frame.
+ResetOutcome expected_outcome() {
+    return {
+        .fed = true,
+        .resets_before_event = 1,
+        .pending_before_event = 188,
+        .resets_after_event = 2,
+        .pending_after_event = 0,
+        .detect_sizes = {kFrame, kFrame},
+    };
+}
+
+} // namespace
+
+TEST(ChunkReaderReset, OverrunResetsOnceAndDropsThePartialFrame) {
+    EXPECT_EQ(partial_frame_then_event(&lws::ChunkReader::notify_overrun), expected_outcome());
+}
+
+TEST(ChunkReaderReset, RelinkResetsOnceAndDropsThePartialFrame) {
+    EXPECT_EQ(partial_frame_then_event(&lws::ChunkReader::notify_relink), expected_outcome());
+}
+
+TEST(ChunkReaderReset, FeedingNeverResets) {
+    FakeVadLog log;
+    auto reader = lws::ChunkReader::create(lws::test::fake_engine(log, kFrame));
+    ASSERT_TRUE(reader.has_value());
+
+    constexpr std::array<std::size_t, 4> kSizes{1, 160, 513, 4096};
+    const auto failed_feeds = std::views::iota(std::size_t{0}, std::size_t{1000}) |
+                              std::views::filter([&](std::size_t i) {
+                                  return !fed_ok(*reader, kSizes.at(i % kSizes.size()));
+                              }) |
+                              std::ranges::to<std::vector>();
+
+    EXPECT_TRUE(failed_feeds.empty());
+    EXPECT_EQ(lws::test::resets(log), 1U);
+}
+
+TEST(ChunkReaderReset, SessionOverrunRelinkGiveExactlyThreeResets) {
+    FakeVadLog log;
+    auto reader = lws::ChunkReader::create(lws::test::fake_engine(log, kFrame));
+    ASSERT_TRUE(reader.has_value());
+
+    const bool fed = fed_ok(*reader, kFrame);
+    reader->notify_overrun();
+    const bool fed_after_overrun = fed_ok(*reader, kFrame);
+    reader->notify_relink();
+    const bool fed_after_relink = fed_ok(*reader, kFrame);
+
+    const std::vector<FakeCall> expected{
+        {FakeCall::Kind::Detect, kFrame}, {FakeCall::Kind::Detect, kFrame + 1},
+        {FakeCall::Kind::Reset, 0}, // session start, after the probe
+        {FakeCall::Kind::Detect, kFrame}, {FakeCall::Kind::Reset, 0}, // overrun
+        {FakeCall::Kind::Detect, kFrame}, {FakeCall::Kind::Reset, 0}, // relink
+        {FakeCall::Kind::Detect, kFrame},
+    };
+    EXPECT_TRUE(fed && fed_after_overrun && fed_after_relink);
+    EXPECT_EQ(lws::test::resets(log), 3U);
+    EXPECT_EQ(log.calls, expected);
+}

@@ -65,6 +65,10 @@ std::expected<ScoredFrames, Error> ChunkReader::feed(std::span<const float> samp
     return out;
 }
 
+void ChunkReader::notify_overrun() { reset_state(); }
+
+void ChunkReader::notify_relink() { reset_state(); }
+
 std::size_t ChunkReader::pending() const noexcept { return pending_.size(); }
 
 void ChunkReader::reset_state() {
