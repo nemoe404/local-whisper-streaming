@@ -1,7 +1,14 @@
 // ChunkReader over fake engines: startup, exact frames and the reset points. No ggml compute.
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <numeric>
 #include <ranges>
+#include <span>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -24,6 +31,106 @@ std::vector<FakeCall> startup_log() {
         {FakeCall::Kind::Detect, kFrame + 1},
         {FakeCall::Kind::Reset, 0},
     };
+}
+
+// 40 whole frames with distinct probabilities in (0, 1), then 300 samples of a partial frame.
+constexpr std::size_t kStreamFrames = 40;
+constexpr std::size_t kPartialSamples = 300;
+constexpr std::array<std::size_t, 8> kChunkSizes{1, 160, 511, 512, 513, 1000, 4096, 10000};
+
+std::vector<float> frame_values() {
+    return std::views::iota(std::size_t{0}, kStreamFrames) |
+           std::views::transform([](std::size_t k) { return static_cast<float>(k + 1) / 64.0F; }) |
+           std::ranges::to<std::vector>();
+}
+
+std::vector<float> test_stream() {
+    auto stream = lws::test::scripted_stream(frame_values());
+    stream.insert(stream.end(), kPartialSamples, 0.5F);
+    return stream;
+}
+
+std::vector<std::uint32_t> bits_of(const std::vector<float>& values) {
+    return values | std::views::transform([](float v) { return std::bit_cast<std::uint32_t>(v); }) |
+           std::ranges::to<std::vector>();
+}
+
+// Everything one chunked pass over test_stream produced.
+struct ChunkedRun {
+    bool all_fed = true;
+    std::vector<std::size_t> detect_sizes; // after the two probe calls
+    std::vector<float> samples;
+    std::vector<float> probs;
+    std::size_t pending = 0;
+};
+
+ChunkedRun run_chunked(std::size_t chunk_size) {
+    FakeVadLog log;
+    auto reader = lws::ChunkReader::create(lws::test::fake_engine(log, kFrame));
+    ChunkedRun run;
+    if (!reader) {
+        run.all_fed = false;
+        return run;
+    }
+    const auto stream = test_stream();
+    std::ranges::for_each(
+        stream | std::views::chunk(static_cast<std::ptrdiff_t>(chunk_size)), [&](auto piece) {
+            const auto scored = reader->feed(std::span<const float>{piece.begin(), piece.end()});
+            if (!scored) {
+                run.all_fed = false;
+                return;
+            }
+            std::ranges::copy(scored->samples, std::back_inserter(run.samples));
+            std::ranges::copy(scored->probs, std::back_inserter(run.probs));
+        });
+    run.detect_sizes =
+        lws::test::detect_sizes(log) | std::views::drop(2) | std::ranges::to<std::vector>();
+    run.pending = reader->pending();
+    return run;
+}
+
+// One whole frame delivered as 511 samples then 1: what the reader did after each piece.
+struct SplitFrame {
+    bool fed = false;
+    std::size_t frames_after_partial = 0;
+    std::size_t detect_calls_after_partial = 0;
+    std::size_t pending_after_partial = 0;
+    std::size_t frames_after_last = 0;
+    std::size_t pending_after_last = 0;
+    std::vector<std::size_t> detect_sizes;
+
+    friend bool operator==(const SplitFrame&, const SplitFrame&) = default;
+};
+
+SplitFrame feed_frame_in_two_pieces() {
+    SplitFrame split;
+    FakeVadLog log;
+    auto reader = lws::ChunkReader::create(lws::test::fake_engine(log, kFrame));
+    if (!reader) {
+        return split;
+    }
+    const std::vector<float> samples(kFrame, 0.25F);
+    const std::span<const float> all{samples};
+
+    const auto partial = reader->feed(all.first(kFrame - 1));
+    split.frames_after_partial = partial ? partial->size() : 0;
+    split.detect_calls_after_partial = lws::test::detect_sizes(log).size();
+    split.pending_after_partial = reader->pending();
+    const auto completed = reader->feed(all.last(1));
+    split.frames_after_last = completed ? completed->size() : 0;
+    split.pending_after_last = reader->pending();
+    split.detect_sizes = lws::test::detect_sizes(log);
+    split.fed = partial.has_value() && completed.has_value();
+    return split;
+}
+
+// One failure message per chunk size for which the predicate is false.
+template <typename Check>
+std::vector<std::string> failures_over_sizes(const char* what, const Check& check) {
+    return kChunkSizes | std::views::filter([&](std::size_t size) { return !check(size); }) |
+           std::views::transform(
+               [&](std::size_t size) { return "chunk " + std::to_string(size) + ": " + what; }) |
+           std::ranges::to<std::vector>();
 }
 
 } // namespace
@@ -63,4 +170,77 @@ TEST(ChunkReaderStartup, OneWholeFrameIsScored) {
     EXPECT_EQ(scored->probs.front(), 0.75F);
     EXPECT_EQ(scored->samples, input);
     EXPECT_EQ(reader->pending(), 0U);
+}
+
+TEST(ChunkReaderFrames, EveryDetectCallAfterStartupIsWholeFrames) {
+    const auto failures =
+        failures_over_sizes("detect size not a positive multiple of 512", [](auto size) {
+            const ChunkedRun run = run_chunked(size);
+            const bool whole = std::ranges::all_of(
+                run.detect_sizes, [](std::size_t n) { return n > 0 && n % kFrame == 0; });
+            const std::size_t total =
+                std::accumulate(run.detect_sizes.begin(), run.detect_sizes.end(), std::size_t{0});
+            return run.all_fed && whole && total == kStreamFrames * kFrame;
+        });
+    EXPECT_EQ(failures, std::vector<std::string>{});
+}
+
+TEST(ChunkReaderFrames, ScoredSamplesAreTheWholeFramePrefixBitExact) {
+    const auto stream = test_stream();
+    const std::vector<float> prefix(stream.begin(), stream.begin() + kStreamFrames * kFrame);
+    const auto failures =
+        failures_over_sizes("scored samples or probabilities differ", [&](auto size) {
+            const ChunkedRun run = run_chunked(size);
+            return run.all_fed && bits_of(run.samples) == bits_of(prefix) &&
+                   bits_of(run.probs) == bits_of(frame_values());
+        });
+    EXPECT_EQ(failures, std::vector<std::string>{});
+}
+
+TEST(ChunkReaderFrames, PartialFrameStaysBufferedUnpadded) {
+    const auto failures = failures_over_sizes("pending is not the remainder", [](auto size) {
+        const ChunkedRun run = run_chunked(size);
+        return run.all_fed && run.pending == kPartialSamples;
+    });
+    EXPECT_EQ(failures, std::vector<std::string>{});
+
+    const SplitFrame expected{
+        .fed = true,
+        .frames_after_partial = 0,
+        .detect_calls_after_partial = 2, // the two probe calls only
+        .pending_after_partial = kFrame - 1,
+        .frames_after_last = 1,
+        .pending_after_last = 0,
+        .detect_sizes = {kFrame, kFrame + 1, kFrame},
+    };
+    EXPECT_EQ(feed_frame_in_two_pieces(), expected);
+}
+
+TEST(ChunkReaderFrames, ResultIsIndependentOfChunkSize) {
+    const ChunkedRun reference = run_chunked(kChunkSizes.front());
+    const auto failures = failures_over_sizes("result differs from chunk 1", [&](auto size) {
+        const ChunkedRun run = run_chunked(size);
+        return run.all_fed && bits_of(run.samples) == bits_of(reference.samples) &&
+               bits_of(run.probs) == bits_of(reference.probs) && run.pending == reference.pending;
+    });
+    EXPECT_TRUE(reference.all_fed);
+    EXPECT_EQ(failures, std::vector<std::string>{});
+}
+
+TEST(ChunkReaderFrames, FrameViewIsOneFrameAtItsOffset) {
+    FakeVadLog log;
+    auto reader = lws::ChunkReader::create(lws::test::fake_engine(log, kFrame));
+    ASSERT_TRUE(reader.has_value());
+    const std::array<float, 3> values{0.25F, 0.5F, 0.75F};
+    const auto scored = reader->feed(lws::test::scripted_stream(values));
+    ASSERT_TRUE(scored.has_value());
+    ASSERT_EQ(scored->size(), 3U);
+
+    const auto failures =
+        std::views::iota(std::size_t{0}, scored->size()) | std::views::filter([&](std::size_t i) {
+            const auto view = scored->frame(i);
+            return view.size() != kFrame || view.data() != &scored->samples.at(i * kFrame);
+        }) |
+        std::ranges::to<std::vector>();
+    EXPECT_TRUE(failures.empty());
 }
