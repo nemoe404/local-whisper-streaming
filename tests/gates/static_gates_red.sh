@@ -419,6 +419,75 @@ proof_ring_wait_free() {
     mark_red ring-wait-free
 }
 
+# ring_build {preset} {target}: touch the ring header, then build the target. gate_restore_now restores
+# with cp -p, so a restored header carries its old mtime, older than the objects built from the seeded
+# text, and ninja would keep those objects. The touch changes no content (git status and the harness
+# snapshot are unaffected); without it the next green control, or leg_matrix.sh in the same gate-seed
+# tree, would run a seeded binary.
+ring_build() {
+    touch "$LWS_GATE_ROOT/include/lws/spsc_ring.hpp"
+    cmake --build --preset "$1" --target "$2"
+}
+
+# RING-04, success criterion 4: seeds S1 and S2, a release store weakened to relaxed in either direction
+# of the handshake. Both measured red under TSan, S1 green without it, which is why only the tsan leg can
+# show this defect.
+proof_ring_ordering() {
+    local rc=0
+    prepare tsan || return 1
+    step ring-ordering-build -- ring_build tsan shell_spsc_ring_concurrency_test || return 1
+    gate_expect_green ring-ordering -- ctest --preset tsan -R '^SpscRingConcurrency\.' || return 1
+    mark_green ring-ordering
+    gate_patch_replace include/lws/spsc_ring.hpp \
+        'write_.store(w + n, std::memory_order_release);' \
+        'write_.store(w + n, std::memory_order_relaxed);'
+    step ring-ordering-s1-build -- ring_build tsan shell_spsc_ring_concurrency_test || rc=1
+    if ((rc == 0)); then
+        red_with ring-ordering-s1 'ThreadSanitizer: data race' 'include/lws/spsc_ring.hpp' -- \
+            ctest --preset tsan -R '^SpscRingConcurrency\.' --output-on-failure || rc=1
+    fi
+    gate_restore_now || rc=1
+    ((rc == 0)) || return 1
+    gate_patch_replace include/lws/spsc_ring.hpp \
+        'read_.store(r + n, std::memory_order_release);' \
+        'read_.store(r + n, std::memory_order_relaxed);'
+    step ring-ordering-s2-build -- ring_build tsan shell_spsc_ring_concurrency_test || rc=1
+    if ((rc == 0)); then
+        red_with ring-ordering-s2 'ThreadSanitizer: data race' 'include/lws/spsc_ring.hpp' -- \
+            ctest --preset tsan -R '^SpscRingConcurrency\.' --output-on-failure || rc=1
+    fi
+    gate_restore_now || rc=1
+    ((rc == 0)) || return 1
+    step ring-ordering-restored-build -- ring_build tsan shell_spsc_ring_concurrency_test || return 1
+    gate_expect_green ring-ordering-restored -- ctest --preset tsan -R '^SpscRingConcurrency\.' || return 1
+    mark_red ring-ordering
+}
+
+# RING-03, success criterion 3: the aborting allocation probe shown able to fail. The seed makes every
+# accepted push allocate a scratch vector. Built on the tsan preset because -O0 cannot elide the
+# allocation; at -O2 a non-escaping allocation can be elided, which would make a release seed unreliable.
+proof_ring_no_alloc() {
+    local rc=0
+    prepare tsan || return 1
+    step ring-no-alloc-build -- ring_build tsan shell_spsc_ring_realtime_test || return 1
+    gate_expect_green ring-no-alloc -- ctest --preset tsan -R '^SpscRingRealTime\.' || return 1
+    mark_green ring-no-alloc
+    gate_patch_replace include/lws/spsc_ring.hpp \
+        'copy_in(w, samples);' \
+        'copy_in(w, std::vector<float>(samples.begin(), samples.end()));'
+    step ring-no-alloc-seeded-build -- ring_build tsan shell_spsc_ring_realtime_test || rc=1
+    if ((rc == 0)); then
+        red_with ring-no-alloc-seeded 'LWS-RT-ALLOCATION' \
+            'SpscRingRealTime.PushNeverAllocatesOnAcceptStraddleOrOverrun' -- \
+            ctest --preset tsan -R '^SpscRingRealTime\.' --output-on-failure || rc=1
+    fi
+    gate_restore_now || rc=1
+    ((rc == 0)) || return 1
+    step ring-no-alloc-restored-build -- ring_build tsan shell_spsc_ring_realtime_test || return 1
+    gate_expect_green ring-no-alloc-restored -- ctest --preset tsan -R '^SpscRingRealTime\.' || return 1
+    mark_red ring-no-alloc
+}
+
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
 if ((${#proof_fns[@]} == 0)); then
     echo "static_gates_red: no proof functions found; refusing to pass an empty run" >&2

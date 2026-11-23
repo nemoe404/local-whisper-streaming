@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # tests/gates/lib.sh: the shared harness of the seeded-defect proofs (D-04). Sourced, never executed;
 # callers run under `set -euo pipefail`. leg_matrix.sh and skip_red.sh source it, and 01-06's
-# static_gates_red.sh sources it later, which is why gate_write and gate_patch_append exist here.
+# static_gates_red.sh sources it later, which is why gate_write, gate_patch_append and gate_patch_replace
+# exist here.
 #
 # Every proof inserts a real defect into a test-only file (never src/), runs under LWS_BUILD_ID=gate-seed
 # so build/gate/ (check.sh's own tree) is never touched, asserts the gate's own token rather than any
@@ -78,6 +79,32 @@ gate_patch_append() {
     sha256sum -- "$file" | cut -d' ' -f1 >"$saved.sha256"
     GATE_PATCHED+=("$file")
     printf '%s\n' "$line" >>"$file"
+}
+
+# gate_patch_replace {tracked-file} {from} {to}: replace the single exact-text occurrence of {from} with
+# {to}. Exit 3 unless {from} occurs exactly once: a typo must not produce a seeded run that is really
+# clean. Saves the original and its sha256 like gate_patch_append, so gate_restore_now undoes it newest first.
+gate_patch_replace() {
+    local file=$1 from=$2 to=$3 saved count
+    count=$(python3 -I -c 'import sys; print(open(sys.argv[1], "rb").read().count(sys.argv[2].encode()))' \
+        "$file" "$from") || {
+        echo "GATE-HARNESS: gate_patch_replace: cannot read $file" >&2
+        exit 3
+    }
+    if [[ $count != 1 ]]; then
+        echo "GATE-HARNESS: gate_patch_replace: '$from' occurs $count times in $file; expected exactly once" >&2
+        exit 3
+    fi
+    saved="$GATE_TMP/patched.${#GATE_PATCHED[@]}"
+    cp -p -- "$file" "$saved"
+    sha256sum -- "$file" | cut -d' ' -f1 >"$saved.sha256"
+    GATE_PATCHED+=("$file")
+    python3 -I -c '
+import sys
+path, old, new = sys.argv[1], sys.argv[2].encode(), sys.argv[3].encode()
+data = open(path, "rb").read()
+open(path, "wb").write(data.replace(old, new, 1))
+' "$file" "$from" "$to"
 }
 
 # gate_restore_now: delete remembered files, copy saved originals back, check each sha256 equals the saved
