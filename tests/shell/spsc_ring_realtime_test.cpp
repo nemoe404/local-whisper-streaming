@@ -101,6 +101,7 @@ const int g_hooks_installed = __sanitizer_install_malloc_and_free_hooks(on_mallo
 // Replacement allocation functions: guard, then forward to the C allocator.
 // NOLINTBEGIN(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,misc-new-delete-overloads,misc-const-correctness)
 // Reason: the global operator new replacement has to forward to the C allocator.
+// This is an allocation counter for the real-time check (push must not allocate), not manual memory management.
 void* operator new(std::size_t size) {
     on_allocation();
     void* ptr = std::malloc(size != 0 ? size : 1);
