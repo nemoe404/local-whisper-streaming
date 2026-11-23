@@ -74,3 +74,86 @@ TEST(SeamMerge, EmptyInputsAreUnchanged) {
 TEST(SeamMerge, ContinuationShorterThanTheRunIsHandled) {
     EXPECT_EQ(lws::seam_merge("a b c", "c"), "");
 }
+
+// D8, D-09a: boundary punctuation and case are ignored for matching.
+TEST(SeamMergeNormalise, CaseFoldAndBoundaryPunctuationAreIgnoredForMatching) {
+    EXPECT_EQ(lws::seam_merge("we met at Noon,", "noon. Then we left"), "Then we left");
+}
+
+// D-09, Pitfall 14: the kept words are cut from the original text.
+TEST(SeamMergeNormalise, KeptTextKeepsItsOriginalCasingAndPunctuation) {
+    EXPECT_EQ(lws::seam_merge("a b", "b Hello, world"), "Hello, world");
+}
+
+// D8b: a word that is only punctuation has an empty key and never matches.
+TEST(SeamMergeNormalise, PunctuationOnlyWordsNeverMatch) {
+    EXPECT_EQ(lws::seam_merge("wait --", "-- go"), "-- go");
+    EXPECT_EQ(lws::seam_merge("hi …", "… there"), "… there");
+    EXPECT_EQ(lws::seam_merge("wait —", "— go"), "— go");
+}
+
+// D8: only the word edges are stripped, so an inner apostrophe stays in the key.
+TEST(SeamMergeNormalise, InnerPunctuationIsPartOfTheKey) {
+    EXPECT_EQ(lws::seam_merge("don't stop", "dont stop now"), "dont stop now");
+}
+
+// Runs of spaces are separators, not empty words.
+TEST(SeamMergeNormalise, MultipleSpacesDoNotCreateEmptyWords) {
+    EXPECT_EQ(lws::seam_merge("a  b", "b   c"), "c");
+}
+
+// D-09a: Cyrillic capitals fold (U+0410..U+042F).
+TEST(SeamMergeUnicode, CyrillicCapitalisedContinuationMatches) {
+    EXPECT_EQ(lws::seam_merge("… мир", "Мир …"), "…");
+    EXPECT_EQ(lws::seam_merge("привет мир", "Мир снова"), "снова");
+}
+
+// D-09a, odd-uppercase block: Ł is U+0141 (odd), so a single even-uppercase rule would miss it.
+TEST(SeamMergeUnicode, PolishCapitalLWithStrokeFolds) {
+    EXPECT_EQ(lws::seam_merge("idziemy do Łodzi", "łodzi jest piękna"), "jest piękna");
+}
+
+// D-09a: Ź is U+0179 (odd), the second odd-uppercase block.
+TEST(SeamMergeUnicode, PolishCapitalZWithAcuteFoldsInTheOddBlock) {
+    EXPECT_EQ(lws::seam_merge("w Źródle", "źródle jest"), "jest");
+}
+
+// D-09a: U+0490 folds to U+0491.
+TEST(SeamMergeUnicode, UkrainianCapitalGheWithUpturnFolds) {
+    EXPECT_EQ(lws::seam_merge("до Ґанку", "ґанку вийшов"), "вийшов");
+}
+
+// D-09a, Latin-1 Supplement block.
+TEST(SeamMergeUnicode, LatinOneCapitalUmlautFolds) {
+    EXPECT_EQ(lws::seam_merge("Ünter", "ünter x"), "x");
+}
+
+// D-09a: U+0130 folds to plain i, not to its parity neighbour U+0131. (U+0178, the other
+// exception, folds to U+00FF.)
+TEST(SeamMergeUnicode, DottedCapitalIAndYDiaeresisAreTheExceptions) {
+    EXPECT_EQ(lws::seam_merge("İstanbul", "istanbul güzel"), "güzel");
+    EXPECT_EQ(lws::seam_merge("Ÿ", "ÿ x"), "x");
+}
+
+// Scope: Greek is outside the D-09a fold table in v0.1.0, so capital and small sigma differ.
+TEST(SeamMergeUnicode, GreekIsOutsideTheFoldTable) {
+    EXPECT_EQ(lws::seam_merge("Σ", "σ x"), "σ x");
+}
+
+// D-09a: an invalid byte passes through byte for byte.
+TEST(SeamMergeInvalid, InvalidBytesPassThroughByteForByte) {
+    EXPECT_EQ(lws::seam_merge("x", "a \xC3 b"), "a \xC3 b");
+}
+
+// An invalid byte equals only the same byte.
+TEST(SeamMergeInvalid, InvalidSequenceMatchesOnlyTheSameBytes) {
+    EXPECT_EQ(lws::seam_merge("\xFF\xFE", "\xFF\xFE tail"), "tail");
+}
+
+// A truncated sequence is two invalid bytes; it does not equal the complete character.
+TEST(SeamMergeInvalid, TruncatedSequenceDoesNotMatchTheCompleteCharacter) {
+    EXPECT_EQ(lws::seam_merge("\xE2\x80", "\xE2\x80\xA6x next"), "\xE2\x80\xA6x next");
+}
+
+// D8: a near-miss is not a duplicate.
+TEST(SeamMergeScope, NoFuzzyMatch) { EXPECT_EQ(lws::seam_merge("wrold", "world x"), "world x"); }
