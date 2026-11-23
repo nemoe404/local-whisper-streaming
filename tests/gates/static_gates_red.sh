@@ -362,6 +362,41 @@ proof_tidy_public_header() {
     mark_red tidy-public-header
 }
 
+# SC5, T-02-10: the include scan. The seed is a core source that includes <thread>, named so that the
+# refusal line carries it. The scan is a text scan, so nothing is compiled.
+proof_core_isolation() {
+    local rc=0
+    gate_expect_green isolation -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/core-isolation-gate.cmake" || return 1
+    mark_green core-isolation
+    gate_write src/core/zz_seed_isolation.cpp '#include <thread>'
+    red_with isolation '[isolation]' 'zz_seed_isolation' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/core-isolation-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    mark_red core-isolation
+}
+
+# SC5, T-02-10: the link closure. The seed links pthread into lws_core from tests/CMakeLists.txt. The
+# closure walk is deferred, so it must see the seed after the reconfigure; the red run also needs the name
+# pthread in its log, which fails the proof if the walk ran before the seed.
+proof_core_closure() {
+    local rc=0
+    prepare release || return 1
+    gate_expect_green closure -- ctest --preset release -R '^core_link_closure$' || return 1
+    mark_green core-closure
+    gate_patch_append tests/CMakeLists.txt 'target_link_libraries(lws_core PRIVATE pthread)'
+    step cfg-closure-seeded -- cmake --preset release || rc=1
+    if ((rc == 0)); then
+        red_with closure '[isolation]' 'pthread' -- ctest --preset release -R '^core_link_closure$' \
+            --output-on-failure || rc=1
+    fi
+    gate_restore_now || rc=1
+    step cfg-closure-restored -- cmake --preset release || rc=1
+    ((rc == 0)) || return 1
+    mark_red core-closure
+}
+
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
 if ((${#proof_fns[@]} == 0)); then
     echo "static_gates_red: no proof functions found; refusing to pass an empty run" >&2

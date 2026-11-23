@@ -51,6 +51,49 @@ foreach(_src IN LISTS LWS_CORE_TESTS)
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
 endforeach()
 
+# Link closure of lws_core (SC5, T-02-10). A breadth-first walk over LINK_LIBRARIES and
+# INTERFACE_LINK_LIBRARIES writes every name it meets, sorted, one per line, to the build tree;
+# scripts/core-isolation-gate.cmake reads it in the core_link_closure test and refuses a whisper, ggml,
+# spdlog or thread name. The walk is deferred to the end of this directory's configure step, so a
+# target_link_libraries line appended below (the seeded red proof) is part of what it reads.
+# If fmt::fmt's own closure ever holds a thread library the check reddens. Do not weaken the gate,
+# report it (research Assumption A7).
+function(lws_write_core_closure)
+    set(_queue lws_core)
+    set(_seen "")
+    while(_queue)
+        list(POP_FRONT _queue _current)
+        if(_current IN_LIST _seen)
+            continue()
+        endif()
+        list(APPEND _seen "${_current}")
+        if(NOT TARGET ${_current})
+            continue()
+        endif()
+        foreach(_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+            get_target_property(_deps ${_current} ${_prop})
+            if(NOT _deps OR _deps MATCHES "NOTFOUND$")
+                continue()
+            endif()
+            # Drop $<LINK_ONLY:...> and any other generator expression wrapper, keeping what it wraps.
+            string(REGEX REPLACE "\\$<[^:>]*:" "" _deps "${_deps}")
+            string(REPLACE ">" "" _deps "${_deps}")
+            list(APPEND _queue ${_deps})
+        endforeach()
+    endwhile()
+    list(REMOVE_ITEM _seen lws_core "")
+    list(SORT _seen)
+    list(JOIN _seen "\n" _text)
+    file(WRITE "${CMAKE_BINARY_DIR}/lws_core_closure.txt" "${_text}\n")
+endfunction()
+cmake_language(DEFER CALL lws_write_core_closure)
+
+add_test(NAME core_link_closure
+    COMMAND ${CMAKE_COMMAND} -DLWS_ROOT=${PROJECT_SOURCE_DIR}
+            -DLWS_CLOSURE_FILE=${CMAKE_BINARY_DIR}/lws_core_closure.txt
+            -P ${PROJECT_SOURCE_DIR}/scripts/core-isolation-gate.cmake)
+set_tests_properties(core_link_closure PROPERTIES LABELS gate TIMEOUT 120)
+
 # Gate verdict rows, run in script mode through the same cmake binary that drives the build. The
 # driver includes cmake/Clang21Toolchain.cmake, so the row verdicts and configure share one owner.
 add_test(NAME toolchain_verdict_cases

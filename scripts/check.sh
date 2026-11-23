@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The gate entry point. Stages in order: format, toolchain (presets), tuning values, models, deps, then one leg per preset
+# The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, models, deps, then one leg per preset
 # (configure, toolchain, isa, sanitizer, build, ctest, skip count), then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
@@ -49,6 +49,16 @@ status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/tuning-gate.cmake" >"$logs/tuning.log" 2>&1 || status=$?
 if ((status != 0)); then
     echo "check: tuning-values gate failed (exit $status); see $logs/tuning.log" >&2
+    exit 1
+fi
+
+# The pure core stays free of whisper, spdlog and thread includes (SC5). A text scan: no configure needed.
+# The link closure of lws_core is checked by the core_link_closure ctest inside the release leg.
+stage "core isolation (SC5)"
+status=0
+cmake -DLWS_ROOT="$root" -P "$root/scripts/core-isolation-gate.cmake" >"$logs/isolation.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: core isolation gate failed (exit $status); see $logs/isolation.log" >&2
     exit 1
 fi
 
