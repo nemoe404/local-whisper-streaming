@@ -17,6 +17,8 @@
 // available. That contract is a documented precondition, checked by tests, not by an assertion.
 namespace lws {
 
+// The analyser's layout finding is the point of the design: each index starts its own cache line.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class SpscRing {
 public:
     // Allocates `capacity` float slots once. capacity > 0 is a programmer error check inside
