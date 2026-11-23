@@ -43,7 +43,7 @@ streamer.push(samples);
 
 ## Build
 
-Requirements: Linux, clang 21, CMake 3.28+, Conan 2. CUDA is optional.
+Requirements: Linux, clang 21, CMake 3.29+, Conan 2. CUDA is optional.
 
 ```sh
 git submodule update --init --recursive
