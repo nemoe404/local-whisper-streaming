@@ -341,6 +341,27 @@ proof_tuning_values() {
     mark_red tuning-values
 }
 
+# GATE-02 companion: clang-tidy reaches the public headers through the .cpp that includes them. The seed is
+# readability-container-size-empty written as an inline function (the gtest body of seeds/tidy_defect.cpp
+# cannot sit in a header). A compile error in place of a finding would not satisfy the path token below.
+proof_tidy_public_header() {
+    local db rc=0
+    db=$(db_preset_default scripts/tidy.sh)
+    prepare "$db" || return 1
+    gate_expect_green tidy-public-header -- scripts/tidy.sh --all || return 1
+    mark_green tidy-public-header
+    gate_patch_append include/lws/options.hpp '#include <vector>'
+    gate_patch_append include/lws/options.hpp \
+        'inline bool lws_seed_empty(const std::vector<std::int32_t>& values) { return values.size() == 0; }'
+    gate_write src/core/zz_seed_tidy_public.cpp '#include "lws/options.hpp"'
+    step cfg-tidy-public-seeded -- cmake --preset "$db" || rc=1
+    gate_expect_red tidy-public-header 'include/lws/options.hpp' -- scripts/tidy.sh --all || rc=1
+    gate_restore_now || rc=1
+    step cfg-tidy-public-restored -- cmake --preset "$db" || rc=1
+    ((rc == 0)) || return 1
+    mark_red tidy-public-header
+}
+
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
 if ((${#proof_fns[@]} == 0)); then
     echo "static_gates_red: no proof functions found; refusing to pass an empty run" >&2

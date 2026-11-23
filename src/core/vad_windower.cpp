@@ -1,4 +1,5 @@
 #include "lws/vad_windower.hpp"
+#include "lws/segment.hpp"
 
 #include <algorithm>
 #include <cassert>

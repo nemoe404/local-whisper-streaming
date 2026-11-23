@@ -81,14 +81,15 @@ gate_patch_append() {
 }
 
 # gate_restore_now: delete remembered files, copy saved originals back, check each sha256 equals the saved
-# value. Returns 1 (and prints the path) when a file did not come back byte for byte.
+# value. Patches are undone newest first, so two patches to one file end on its first saved original.
+# Returns 1 (and prints the path) when a file did not come back byte for byte.
 gate_restore_now() {
     local rc=0 path i saved want got
     for path in "${GATE_CREATED[@]}"; do
         rm -f -- "$path"
     done
     GATE_CREATED=()
-    for i in "${!GATE_PATCHED[@]}"; do
+    for ((i = ${#GATE_PATCHED[@]} - 1; i >= 0; i--)); do
         path=${GATE_PATCHED[$i]}
         saved="$GATE_TMP/patched.$i"
         cp -p -- "$saved" "$path"

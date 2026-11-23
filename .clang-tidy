@@ -1,6 +1,6 @@
-# Root clang-tidy policy; applies to src/core. Later globs override earlier ones, so the
-# disables sit last in Checks. Comments live here, above the key: a '#' line inside a YAML
-# block scalar is part of the string, not a comment.
+# Root clang-tidy policy; applies to src/core and the public headers under include/lws. Later globs
+# override earlier ones, so the disables sit last in Checks. Comments live here, above the key: a
+# '#' line inside a YAML block scalar is part of the string, not a comment.
 #
 # Disabled checks and why:
 #   modernize-use-trailing-return-type            style only
@@ -9,6 +9,7 @@
 #   bugprone-easily-swappable-parameters          fires on (snapshot, selection) style signatures whose types already differ
 #   readability-magic-numbers                     DSP constants and test tables
 #   cppcoreguidelines-avoid-magic-numbers         alias of readability-magic-numbers
+#   portability-avoid-pragma-once                 clang 21 is the only compiler; every public header uses #pragma once
 #
 # bugprone-narrowing-conversions stays enabled (clang-tidy 21 name;
 # cppcoreguidelines-narrowing-conversions is its alias).
@@ -30,7 +31,8 @@ Checks: >
   -misc-include-cleaner,
   -bugprone-easily-swappable-parameters,
   -readability-magic-numbers,
-  -cppcoreguidelines-avoid-magic-numbers
+  -cppcoreguidelines-avoid-magic-numbers,
+  -portability-avoid-pragma-once
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/src/core/.*'
+HeaderFilterRegex: '.*/(src/core|include/lws)/.*'
 ...
