@@ -115,8 +115,13 @@ def main():
         f"numpy {numpy.__version__}; silero_vad.onnx sha256 {sha256_of(model_path)}"
     )
     print(f"# wav {wav_name} sha256 {sha256_of(args.wav)}; {SAMPLE_RATE} Hz mono; int16 / 32768")
+    detail = (
+        "zeros after reset"
+        if args.context == "previous"
+        else "reflection of the current frame, as the fork pads"
+    )
     print(
-        f"# context {args.context} ({CONTEXT} samples, zeros after reset); frames {len(values)}; "
+        f"# context {args.context} ({CONTEXT} samples, {detail}); frames {len(values)}; "
         f"tail samples not scored {len(samples) - len(values) * FRAME}"
     )
     print("# frame probability")
