@@ -15,8 +15,8 @@
 namespace lws {
 
 // Frames of look-back the tail must hold so that, after the onset run is spent, a full pre-roll of
-// leading frames is still in front of the first speech frame (D1, CORE-09). Not constexpr on
-// purpose: the argument names are tuning identifiers.
+// leading frames is still in front of the first speech frame (D1, CORE-09).
+// Not constexpr on purpose: the argument names are tuning identifiers.
 [[nodiscard]] std::size_t preroll_tail_frames(std::size_t pre_roll_frames,
                                               std::size_t onset_frames) noexcept;
 
