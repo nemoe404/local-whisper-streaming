@@ -419,6 +419,30 @@ proof_ring_wait_free() {
     mark_red ring-wait-free
 }
 
+# The VAD API text gate. Both seeds are real code appended to include/lws/segment.hpp,
+# a header the gate scans; seeds go to a scanned header, never to src/. One calls whisper's detection
+# variant that resets state, one is a signal-level stand-in for Silero. The gate is a text scan, so
+# nothing is compiled.
+proof_vad_api() {
+    local rc=0
+    gate_expect_green vad-api -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/vad-gate.cmake" || return 1
+    mark_green vad-api
+    gate_patch_append include/lws/segment.hpp \
+        'inline bool lws_seed_reset_variant(struct whisper_vad_context* c, const float* s) { return whisper_vad_detect_speech(c, s, 512); }'
+    red_with vad-api '[vad]' 'reset-variant' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/vad-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_append include/lws/segment.hpp \
+        'inline float lws_seed_energy_gate(float level) { return level > 0.5F ? 1.0F : 0.0F; }'
+    red_with vad-api '[vad]' 'substitute-detector' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/vad-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    mark_red vad-api
+}
+
 # ring_build {preset} {target}: touch the ring header, then build the target. gate_restore_now restores
 # with cp -p, so a restored header carries its old mtime, older than the objects built from the seeded
 # text, and ninja would keep those objects. The touch changes no content (git status and the harness
