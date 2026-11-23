@@ -2,21 +2,21 @@
 
 #include <gtest/gtest.h>
 
-// CORE-01: equal counters, nothing used.
+// Equal counters, nothing used.
 TEST(RingIndexEmpty, FreeSpaceIsCapacityWhenNothingUsed) {
     const lws::RingIndex ring{8};
     EXPECT_EQ(ring.used(5, 5), 0U);
     EXPECT_EQ(ring.free_space(ring.used(5, 5)), 8U);
 }
 
-// CORE-01: equal wrapped indices, but the counters differ by the capacity.
+// Equal wrapped indices, but the counters differ by the capacity.
 TEST(RingIndexFull, FreeSpaceIsZeroWhenFull) {
     const lws::RingIndex ring{8};
     EXPECT_EQ(ring.used(3, 11), 8U);
     EXPECT_EQ(ring.free_space(ring.used(3, 11)), 0U);
 }
 
-// CORE-01: a position wraps modulo the capacity.
+// A position wraps modulo the capacity.
 TEST(RingIndexWrap, PositionsWrapModuloCapacity) {
     const lws::RingIndex ring{8};
     EXPECT_EQ(ring.wrap(7), 7U);
@@ -24,7 +24,7 @@ TEST(RingIndexWrap, PositionsWrapModuloCapacity) {
     EXPECT_EQ(ring.wrap(19), 3U);
 }
 
-// CORE-01: the wrapped write index sits behind the wrapped read index.
+// The wrapped write index sits behind the wrapped read index.
 TEST(RingIndexWrapped, WrappedOccupancyCountsTheGap) {
     const lws::RingIndex ring{8};
     EXPECT_EQ(ring.wrap(10), 2U);
@@ -34,7 +34,7 @@ TEST(RingIndexWrapped, WrappedOccupancyCountsTheGap) {
     EXPECT_EQ(ring.free_space(ring.used(6, 10)), 4U);
 }
 
-// CORE-01: the constructed capacity is reported back.
+// The constructed capacity is reported back.
 TEST(RingIndexCapacity, ReportsConstructedCapacity) {
     const lws::RingIndex ring{4096};
     EXPECT_EQ(ring.capacity(), 4096U);

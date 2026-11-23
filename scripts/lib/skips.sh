@@ -2,8 +2,8 @@
 # options of its own, so it runs under the caller's `set -euo pipefail`.
 #
 # ctest exits 0 when a test is skipped, so the count of `***Skipped` lines in a ctest log is the
-# only signal that a skip happened. check.sh and 01-04's tests/gates/lib.sh both source this file,
-# so the two can never count differently. 01-04's tests/gates/skip_red.sh uses lws_has_skip_marker
+# only signal that a skip happened. check.sh and tests/gates/lib.sh both source this file,
+# so the two can never count differently. tests/gates/skip_red.sh uses lws_has_skip_marker
 # for its per-test presence check, so no gate script greps the skip marker itself.
 
 # lws_count_skips {ctest-log}

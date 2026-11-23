@@ -13,7 +13,7 @@ namespace lws {
 
 namespace {
 
-// CORE-07: a seam duplicates at most this many words.
+// A seam duplicates at most this many words.
 constexpr std::size_t kMaxRun = 4;
 
 // Keys at or above this value stand for one invalid byte (key = base + byte), so an invalid byte
@@ -194,7 +194,7 @@ struct Word {
            std::ranges::to<std::vector>();
 }
 
-// D8b: a word whose key is empty (punctuation only) never matches.
+// A word whose key is empty (punctuation only) never matches.
 [[nodiscard]] bool words_match(const Word& a, const Word& b) {
     return !a.key.empty() && !b.key.empty() && std::ranges::equal(a.key, b.key);
 }
@@ -206,7 +206,7 @@ std::string seam_merge(std::string_view previous, std::string_view continuation)
     const auto cont = words(continuation);
     const std::size_t max_run = std::min({kMaxRun, prev.size(), cont.size()});
 
-    // Largest run first, so a two-word repeat is removed as two words (Pitfall 15).
+    // Largest run first, so a two-word repeat is removed as two words.
     const auto runs = std::views::iota(std::size_t{1}, max_run + 1) | std::views::reverse;
     const auto hit = std::ranges::find_if(runs, [&](std::size_t k) {
         return std::ranges::equal(prev | std::views::drop(prev.size() - k),

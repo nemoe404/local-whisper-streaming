@@ -22,10 +22,10 @@ std::size_t preroll_tail_frames(std::size_t pre_roll_frames, std::size_t onset_f
 
 namespace {
 
-// The cut looks for the lowest probability in the last 1.5 s of the window (CORE-05).
+// The cut looks for the lowest probability in the last 1.5 s of the window.
 const std::size_t kCutSearchFrames = static_cast<std::size_t>(ms_to_frames_ceil(1500));
 
-// The cut history is a strict ordering: a NaN is stored as 0.0F (D11b). The frame is still
+// The cut history is a strict ordering: a NaN is stored as 0.0F. The frame is still
 // sub-threshold, because the threshold test reads the original probability.
 float history_value(float prob) noexcept { return std::isnan(prob) ? 0.0F : prob; }
 
@@ -75,13 +75,13 @@ std::expected<VadWindower, Error> VadWindower::create(const Options& options) {
     if (!valid) {
         return std::unexpected(valid.error());
     }
-    // A required duration clamps to one frame (D-15); the pre-roll may be zero.
+    // A required duration clamps to one frame; the pre-roll may be zero.
     const auto onset = static_cast<std::size_t>(
         std::max<std::uint64_t>(1U, ms_to_frames_ceil(options.min_speech_duration_ms)));
     const auto hangover = static_cast<std::size_t>(
         std::max<std::uint64_t>(1U, ms_to_frames_ceil(options.min_silence_duration_ms)));
     const auto pre = static_cast<std::size_t>(ms_to_frames_ceil(options.pre_roll_ms));
-    // D3: the ceiling rounds up, so 14 s gives 438 frames. validate() has bounded the input.
+    // The ceiling rounds up, so 14 s gives 438 frames. validate() has bounded the input.
     const auto ceiling = static_cast<std::size_t>(
         std::ceil(static_cast<double>(options.max_speech_duration_s) * 1000.0 / 32.0));
     const auto overlap = static_cast<std::size_t>(ms_to_frames_ceil(options.overlap_ms));
@@ -90,7 +90,7 @@ std::expected<VadWindower, Error> VadWindower::create(const Options& options) {
 
 Segment VadWindower::cut_at_minimum() {
     const std::size_t cut = find_cut_frame(window_probs_);
-    // D-07, user decision: at least one frame leaves the window, so a cut at or below the overlap
+    // Decision: at least one frame leaves the window, so a cut at or below the overlap
     // cannot leave the remainder equal to the whole window.
     const std::size_t overlap = std::min(overlap_frames_, cut - 1);
     const std::size_t removed = cut - overlap;

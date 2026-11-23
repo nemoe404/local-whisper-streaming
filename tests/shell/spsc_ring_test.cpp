@@ -42,7 +42,7 @@ std::vector<float> pop_all(lws::SpscRing& ring, std::size_t count) {
 
 } // namespace
 
-// RING-01, RING-03: a push followed by a pop returns the same samples in order.
+// A push followed by a pop returns the same samples in order.
 TEST(SpscRingBasic, PushThenPopReturnsSamplesInOrder) {
     lws::SpscRing ring{8};
     const std::vector<float> in = pattern(0, 5);

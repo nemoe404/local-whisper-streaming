@@ -1,4 +1,4 @@
-# scripts/ring-gate.cmake: the ring wait-free gate (RING-03, success criterion 3).
+# scripts/ring-gate.cmake: the ring wait-free gate.
 #
 #   cmake -DLWS_ROOT={root} -P scripts/ring-gate.cmake
 #

@@ -23,10 +23,10 @@ lws::Options with_ceiling(float seconds) {
 
 } // namespace
 
-// CORE-10, D-11: the defaults are accepted.
+// The defaults are accepted.
 TEST(OptionsDefaults, DefaultsValidate) { EXPECT_TRUE(lws::validate(lws::Options{}).has_value()); }
 
-// CORE-10: the open interval (0, 1), NaN included.
+// The open interval (0, 1), NaN included.
 TEST(OptionsThreshold, ZeroOneNanNegativeAndAboveOneAreInvalidThreshold) {
     const std::array values{0.0F, 1.0F, std::numeric_limits<float>::quiet_NaN(), -0.1F, 1.5F};
     std::ranges::for_each(values, [](float value) {
@@ -36,7 +36,7 @@ TEST(OptionsThreshold, ZeroOneNanNegativeAndAboveOneAreInvalidThreshold) {
     });
 }
 
-// D10: a ceiling that is not a positive finite number is an invalid duration.
+// A ceiling that is not a positive finite number is an invalid duration.
 TEST(OptionsDuration, NonFiniteAndNonPositiveCeilingAreInvalidDuration) {
     const std::array values{std::numeric_limits<float>::quiet_NaN(),
                             std::numeric_limits<float>::infinity(), 0.0F, -1.0F};
@@ -47,7 +47,7 @@ TEST(OptionsDuration, NonFiniteAndNonPositiveCeilingAreInvalidDuration) {
     });
 }
 
-// CORE-10: exactly 25 s is the largest accepted ceiling.
+// Exactly 25 s is the largest accepted ceiling.
 TEST(OptionsDuration, TwentyFiveSecondsAcceptedAboveTwentyFiveRejected) {
     EXPECT_TRUE(lws::validate(with_ceiling(25.0F)).has_value());
     const auto result = lws::validate(with_ceiling(25.001F));
@@ -66,14 +66,14 @@ TEST(OptionsDuration, CeilingNoLongerThanPreRollPlusOnsetIsCeilingTooShort) {
     EXPECT_EQ(result.error(), lws::Error::CeilingTooShort);
 }
 
-// D10, D-15: zero minimum speech is accepted; it clamps to one frame later.
+// Zero minimum speech is accepted; it clamps to one frame later.
 TEST(OptionsOnset, ZeroMinSpeechIsAccepted) {
     lws::Options options;
     options.min_speech_duration_ms = 0;
     EXPECT_TRUE(lws::validate(options).has_value());
 }
 
-// D-15: ceil(ms / 32).
+// ceil(ms / 32).
 TEST(FrameConversion, CeilDivisionByThirtyTwoMs) {
     EXPECT_EQ(lws::ms_to_frames_ceil(250), 8U);
     EXPECT_EQ(lws::ms_to_frames_ceil(300), 10U);
@@ -83,7 +83,7 @@ TEST(FrameConversion, CeilDivisionByThirtyTwoMs) {
     EXPECT_EQ(lws::ms_to_frames_ceil(33), 2U);
 }
 
-// D-16: one frame is a whole 32 ms.
+// One frame is a whole 32 ms.
 TEST(FrameOwner, Frame512IsWholeMilliseconds) {
     EXPECT_EQ(lws::kVadFrameSamples * 1000U / lws::kSampleRateHz, 32U);
 }

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# tests/gates/run.sh: the one entry point of the seeded-defect proofs (D-04). No arguments.
+# tests/gates/run.sh: the one entry point of the seeded-defect proofs. No arguments.
 #
 # It runs every proof script, each to its own log under build/gate-seed/logs/run/, reads each exit status
 # directly and prints one line per script: PASS, FAIL, or, when legs_consistency.sh exits 77 because the
 # local-only AGENTS.md is absent, NOT RUN. A NOT RUN is reported and never counted as a pass. The last line is
 # GATES-PROVEN scripts={passed} not-run={n}. Exit 0 only when no script failed.
 #
-# Hosted CI is Phase 7 (deferred) and calls this script. check.sh does not call it, because the leg matrix
+# Hosted CI (deferred) calls this script. check.sh does not call it, because the leg matrix
 # rebuilds every leg once per seed.
 set -euo pipefail
 

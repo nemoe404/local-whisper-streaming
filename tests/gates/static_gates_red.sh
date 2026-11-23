@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tests/gates/static_gates_red.sh: the static gates shown red on a seeded defect and green on the same
-# command without it (D-04, GATE-01). No arguments.
+# command without it. No arguments.
 #
 # Every proof is a function named proof_{name}, the name's dashes written as underscores, defined at column 0.
 # The runner derives the list of proofs from those definitions, in file order, so the functions are the one
@@ -321,7 +321,7 @@ PY
     mark_red legs-consistency
 }
 
-# GATE-02: the tuning-values gate. The seed names are camel case on purpose: they are the case the
+# The tuning-values gate. The seed names are camel case on purpose: they are the case the
 # gate's lowercase step exists to catch. The gate is a text scan, so a header is never compiled.
 proof_tuning_values() {
     local rc=0
@@ -341,7 +341,7 @@ proof_tuning_values() {
     mark_red tuning-values
 }
 
-# GATE-02 companion: clang-tidy reaches the public headers through the .cpp that includes them. The seed is
+# Companion: clang-tidy reaches the public headers through the .cpp that includes them. The seed is
 # readability-container-size-empty written as an inline function (the gtest body of seeds/tidy_defect.cpp
 # cannot sit in a header). A compile error in place of a finding would not satisfy the path token below.
 proof_tidy_public_header() {
@@ -362,7 +362,7 @@ proof_tidy_public_header() {
     mark_red tidy-public-header
 }
 
-# SC5, T-02-10: the include scan. The seed is a core source that includes <thread>, named so that the
+# The include scan. The seed is a core source that includes <thread>, named so that the
 # refusal line carries it. The scan is a text scan, so nothing is compiled.
 proof_core_isolation() {
     local rc=0
@@ -377,7 +377,7 @@ proof_core_isolation() {
     mark_red core-isolation
 }
 
-# SC5, T-02-10: the link closure. The seed links pthread into lws_core from tests/CMakeLists.txt. The
+# The link closure. The seed links pthread into lws_core from tests/CMakeLists.txt. The
 # closure walk is deferred, so it must see the seed after the reconfigure; the red run also needs the name
 # pthread in its log, which fails the proof if the walk ran before the seed.
 proof_core_closure() {
@@ -397,7 +397,7 @@ proof_core_closure() {
     mark_red core-closure
 }
 
-# RING-03: the ring wait-free gate. Both seeds are real code appended to include/lws/spsc_ring.hpp (a
+# The ring wait-free gate. Both seeds are real code appended to include/lws/spsc_ring.hpp (a
 # compare-and-swap call and a fetch-style add). The gate is a text scan, so nothing is compiled.
 proof_ring_wait_free() {
     local rc=0
@@ -419,6 +419,30 @@ proof_ring_wait_free() {
     mark_red ring-wait-free
 }
 
+# The VAD API text gate. Both seeds are real code appended to include/lws/segment.hpp,
+# a header the gate scans; seeds go to a scanned header, never to src/. One calls whisper's detection
+# variant that resets state, one is a signal-level stand-in for Silero. The gate is a text scan, so
+# nothing is compiled.
+proof_vad_api() {
+    local rc=0
+    gate_expect_green vad-api -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/vad-gate.cmake" || return 1
+    mark_green vad-api
+    gate_patch_append include/lws/segment.hpp \
+        'inline bool lws_seed_reset_variant(struct whisper_vad_context* c, const float* s) { return whisper_vad_detect_speech(c, s, 512); }'
+    red_with vad-api '[vad]' 'reset-variant' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/vad-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_append include/lws/segment.hpp \
+        'inline float lws_seed_energy_gate(float level) { return level > 0.5F ? 1.0F : 0.0F; }'
+    red_with vad-api '[vad]' 'substitute-detector' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/vad-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    mark_red vad-api
+}
+
 # ring_build {preset} {target}: touch the ring header, then build the target. gate_restore_now restores
 # with cp -p, so a restored header carries its old mtime, older than the objects built from the seeded
 # text, and ninja would keep those objects. The touch changes no content (git status and the harness
@@ -429,7 +453,7 @@ ring_build() {
     cmake --build --preset "$1" --target "$2"
 }
 
-# RING-04, success criterion 4: seeds S1 and S2, a release store weakened to relaxed in either direction
+# The two seeds weaken a release store to relaxed, one in each direction
 # of the handshake. Both measured red under TSan, S1 green without it, which is why only the tsan leg can
 # show this defect.
 proof_ring_ordering() {
@@ -463,7 +487,7 @@ proof_ring_ordering() {
     mark_red ring-ordering
 }
 
-# RING-03, success criterion 3: the aborting allocation probe shown able to fail. The seed makes every
+# The aborting allocation probe is shown able to fail. The seed makes every
 # accepted push allocate a scratch vector. Built on the tsan preset because -O0 cannot elide the
 # allocation; at -O2 a non-escaping allocation can be elided, which would make a release seed unreliable.
 proof_ring_no_alloc() {

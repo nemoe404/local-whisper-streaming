@@ -1,4 +1,4 @@
-# Sanitizer instrumentation for the whisper.cpp subtree (ggml included): BLD-04, decision D-01.
+# Sanitizer instrumentation for the whisper.cpp subtree (ggml included).
 #
 # Included as the LAST step of project("whisper.cpp" C CXX) (third_party/whisper.cpp/CMakeLists.txt
 # line 2) through CMAKE_PROJECT_whisper.cpp_INCLUDE. That timing is the point of this file. It runs
@@ -22,12 +22,11 @@
 # ------------
 # add_compile_options and add_link_options here set directory properties that whisper.cpp's targets
 # and the ggml subdirectory inherit and that nothing outside that subtree sees. No CMAKE_<LANG>_FLAGS
-# variable is touched, so Conan's flags stay intact and BLD-04's wording holds literally. The compile
+# variable is touched, so Conan's flags stay intact and the wording holds literally. The compile
 # flags apply to C and C++ sources only: ggml enables ASM, and the flags are meaningless to it.
 #
 # lws targets get the same lists through the lws_sanitizers INTERFACE target in the root
 # CMakeLists.txt, and scripts/sanitizer-gate.cmake proves every compile entry carries them.
-# The BLD-04 reading is recorded in the 01-03 summary ("Readings to confirm").
 #
 # Measured scope: measurements/sanitizer-scope.md, Outcome A under the post-hoc amended H1 (the amendment
 # and the outcome are recorded there). The tsan test preset sets no label filter, so real-model and ggml-mt

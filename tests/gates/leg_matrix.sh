@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/gates/leg_matrix.sh: the ctest leg matrix (plan 01-04). No arguments.
+# tests/gates/leg_matrix.sh: the ctest leg matrix. No arguments.
 #
 # Runs a control row (no seed) and five seeded defects against every candidate leg (the non-hidden configure
 # presets of CMakePresets.json, in file order) and keeps a leg only if some seed turns it red while every

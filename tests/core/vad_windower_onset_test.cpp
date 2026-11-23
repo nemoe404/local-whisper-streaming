@@ -25,14 +25,14 @@ std::vector<float> ids_of(const lws::Segment& segment) {
 
 } // namespace
 
-// CORE-03, Edge 1: a run one frame short of the onset (8 frames at defaults) opens nothing.
+// A run one frame short of the onset (8 frames at defaults) opens nothing.
 TEST(OnsetGate, SevenSpeechFramesThenSilenceOpensNothing) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(lws::test::feed_run(windower, 1.0F, 7, kSpeech).empty());
     EXPECT_TRUE(lws::test::feed_run(windower, 8.0F, 40, kQuiet).empty());
 }
 
-// CORE-03, Edge 1: exactly 8 speech frames open a window; 8 + 21 trailing = 29 frames.
+// Exactly 8 speech frames open a window; 8 + 21 trailing = 29 frames.
 TEST(OnsetGate, EightSpeechFramesOpenAWindow) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(lws::test::feed_run(windower, 1.0F, 8, kSpeech).empty());
@@ -42,7 +42,7 @@ TEST(OnsetGate, EightSpeechFramesOpenAWindow) {
     EXPECT_EQ(lws::test::frame_count(emitted.front()), 29U);
 }
 
-// CORE-03, Edge 2: the first sub-threshold frame resets the onset run.
+// The first sub-threshold frame resets the onset run.
 TEST(OnsetGate, SubThresholdResetsTheOnsetRun) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(lws::test::feed_run(windower, 1.0F, 7, kSpeech).empty());
@@ -56,7 +56,7 @@ TEST(OnsetGate, SubThresholdResetsTheOnsetRun) {
     EXPECT_EQ(emitted.size(), 1U);
 }
 
-// CORE-03, ROADMAP SC1, Edge 3: 100 cycles of 7 speech frames and 1 silent frame never open.
+// 100 cycles of 7 speech frames and 1 silent frame never open.
 TEST(OnsetGate, ImpulseTrainOfShortBurstsNeverOpens) {
     auto windower = lws::test::make_windower();
     std::size_t total = 0;
@@ -69,7 +69,7 @@ TEST(OnsetGate, ImpulseTrainOfShortBurstsNeverOpens) {
     EXPECT_EQ(total, 0U);
 }
 
-// Edge 5: prob equal to the threshold (the default 0.5) counts as speech.
+// Prob equal to the threshold (the default 0.5) counts as speech.
 TEST(OnsetGate, ThresholdEqualityCountsAsSpeech) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(lws::test::feed_run(windower, 1.0F, 8, 0.5F).empty());
@@ -78,7 +78,7 @@ TEST(OnsetGate, ThresholdEqualityCountsAsSpeech) {
     EXPECT_EQ(lws::test::frame_count(emitted.front()), 29U);
 }
 
-// D-15, Edge 6: min_speech_duration_ms = 0 clamps the onset to 1 frame. 1 speech + 21 trailing
+// min_speech_duration_ms = 0 clamps the onset to 1 frame. 1 speech + 21 trailing
 // = 22.
 TEST(OnsetGate, MinSpeechZeroOpensOnTheFirstSpeechFrame) {
     lws::Options options;
@@ -90,7 +90,7 @@ TEST(OnsetGate, MinSpeechZeroOpensOnTheFirstSpeechFrame) {
     EXPECT_EQ(lws::test::frame_count(emitted.front()), 22U);
 }
 
-// CORE-09, Edge 18: 10 quiet frames ahead of the onset are all kept (pre_roll 300 ms is 10 frames).
+// 10 quiet frames ahead of the onset are all kept (pre_roll 300 ms is 10 frames).
 TEST(QuietOnset, TenQuietFramesAheadOfTheOnsetAreKept) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(lws::test::feed_run(windower, 1.0F, 10, kQuiet).empty());
@@ -104,7 +104,7 @@ TEST(QuietOnset, TenQuietFramesAheadOfTheOnsetAreKept) {
     EXPECT_FLOAT_EQ(ids.at(10), 11.0F);
 }
 
-// CORE-09, Edge 18 boundary: with 11 quiet frames the earliest one is dropped.
+// Boundary: with 11 quiet frames the earliest one is dropped.
 TEST(QuietOnset, ElevenQuietFramesDropTheEarliest) {
     auto windower = lws::test::make_windower();
     EXPECT_TRUE(lws::test::feed_run(windower, 1.0F, 11, kQuiet).empty());
@@ -114,7 +114,7 @@ TEST(QuietOnset, ElevenQuietFramesDropTheEarliest) {
     EXPECT_FLOAT_EQ(lws::test::frame_id(emitted.front(), 0), 2.0F);
 }
 
-// CORE-09, Pitfall 1: 30 quiet frames leave exactly 10 lead-in frames (5120 samples), not the onset
+// 30 quiet frames leave exactly 10 lead-in frames (5120 samples), not the onset
 // run eating the pre-roll.
 TEST(PreRollTail, ThirtyQuietFramesLeaveExactlyPreRollFramesOfLeadIn) {
     auto windower = lws::test::make_windower();
@@ -128,7 +128,7 @@ TEST(PreRollTail, ThirtyQuietFramesLeaveExactlyPreRollFramesOfLeadIn) {
     EXPECT_EQ(lead_in * 512, 5120);
 }
 
-// D1, CORE-09: tail capacity is pre + onset - 1 frames: 10 + 8 - 1 = 17 frames = 8704 samples.
+// Tail capacity is pre + onset - 1 frames: 10 + 8 - 1 = 17 frames = 8704 samples.
 TEST(PreRollTail, CapacityIsPreRollPlusOnsetMinusOneFrames) {
     EXPECT_EQ(lws::preroll_tail_frames(10, 8), 17U);
     EXPECT_EQ(lws::preroll_tail_frames(10, 8) * 512U, 8704U);

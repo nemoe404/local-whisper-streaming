@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/gates/legs_consistency.sh: the four places that name the ctest legs must name the same set (GATE-01).
+# tests/gates/legs_consistency.sh: the four places that name the ctest legs must name the same set.
 # No arguments.
 #
 #   scripts/check.sh                the single `legs=(...)` line

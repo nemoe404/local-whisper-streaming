@@ -1,4 +1,4 @@
-# tests/gates/isa_verdict_cases.cmake: script-mode rows for the ISA verdict (BLD-01, success criterion 2).
+# tests/gates/isa_verdict_cases.cmake: script-mode rows for the ISA verdict.
 #
 #   cmake -DLWS_ROOT={root} -P tests/gates/isa_verdict_cases.cmake
 #
