@@ -96,7 +96,7 @@ endforeach()
 # spdlog or thread name. The walk is deferred to the end of this directory's configure step, so a
 # target_link_libraries line appended below (the seeded red proof) is part of what it reads.
 # If fmt::fmt's own closure ever holds a thread library the check reddens. Do not weaken the gate,
-# report it (research Assumption A7).
+# report it as a finding.
 function(lws_write_core_closure)
     set(_queue lws_core)
     set(_seen "")
