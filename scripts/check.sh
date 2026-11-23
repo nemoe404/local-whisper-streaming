@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, models, deps, then one leg per preset
+# The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, ring wait-free, models, deps, then one leg per preset
 # (configure, toolchain, isa, sanitizer, build, ctest, skip count), then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
@@ -59,6 +59,16 @@ status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/core-isolation-gate.cmake" >"$logs/isolation.log" 2>&1 || status=$?
 if ((status != 0)); then
     echo "check: core isolation gate failed (exit $status); see $logs/isolation.log" >&2
+    exit 1
+fi
+
+# The ring stays wait-free by construction (RING-03): no compare-and-swap, plain slots, no lock. A text
+# scan of the ring header: no configure needed.
+stage "ring wait-free (RING-03)"
+status=0
+cmake -DLWS_ROOT="$root" -P "$root/scripts/ring-gate.cmake" >"$logs/ring.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: ring wait-free gate failed (exit $status); see $logs/ring.log" >&2
     exit 1
 fi
 
@@ -180,4 +190,4 @@ if ((status != 0)); then
 fi
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,core-isolation,ring-wait-free,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"

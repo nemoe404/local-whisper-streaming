@@ -397,6 +397,28 @@ proof_core_closure() {
     mark_red core-closure
 }
 
+# RING-03: the ring wait-free gate. Both seeds are real code appended to include/lws/spsc_ring.hpp (a
+# compare-and-swap call and a fetch-style add). The gate is a text scan, so nothing is compiled.
+proof_ring_wait_free() {
+    local rc=0
+    gate_expect_green ring-wait-free -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/ring-gate.cmake" || return 1
+    mark_green ring-wait-free
+    gate_patch_append include/lws/spsc_ring.hpp \
+        'inline bool lws_seed_cas(std::atomic<std::size_t>& value) { std::size_t seen = 0; return value.compare_exchange_strong(seen, 1); }'
+    red_with ring-wait-free '[ring]' 'compare_exchange' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/ring-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_append include/lws/spsc_ring.hpp \
+        'inline std::size_t lws_seed_rmw(std::atomic<std::size_t>& value) { return value.fetch_add(1); }'
+    red_with ring-wait-free '[ring]' 'fetch_' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/ring-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    mark_red ring-wait-free
+}
+
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
 if ((${#proof_fns[@]} == 0)); then
     echo "static_gates_red: no proof functions found; refusing to pass an empty run" >&2
