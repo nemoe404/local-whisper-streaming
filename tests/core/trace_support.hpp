@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <ranges>
 #include <utility>
 #include <vector>
@@ -33,6 +34,10 @@ inline float frame_id(const Segment& segment, std::size_t index) {
 inline VadWindower make_windower(const Options& options = Options{}) {
     return VadWindower::create(options).value();
 }
+
+// The segment a lifecycle call returned. A call that returned nothing throws, which gtest reports
+// as a failed test, and clang-tidy sees a checked access.
+inline Segment segment_of(std::optional<Segment> result) { return std::move(result).value(); }
 
 // Feeds count frames with ids first_id, first_id + 1, ... at prob. Returns each emitted segment.
 inline std::vector<Segment> feed_run(VadWindower& windower, float first_id, std::size_t count,

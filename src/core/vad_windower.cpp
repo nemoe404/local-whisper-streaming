@@ -114,6 +114,57 @@ Segment VadWindower::cut_at_minimum() {
     return emitted;
 }
 
+Segment VadWindower::take_window(CloseReason reason) {
+    assert(open_);
+    Segment segment{.samples = std::move(window_samples_),
+                    .start = window_start_,
+                    .reason = reason,
+                    .continues_previous = current_continues_previous_,
+                    .discontinuous_before = current_discontinuous_before_};
+    window_samples_.clear();
+    window_probs_.clear();
+    open_ = false;
+    silence_frames_ = 0;
+    current_continues_previous_ = false;
+    current_discontinuous_before_ = false;
+    return segment;
+}
+
+void VadWindower::reset_automaton() noexcept {
+    speech_streak_ = 0;
+    tail_samples_.clear();
+    tail_probs_.clear();
+}
+
+std::optional<Segment> VadWindower::force_close() {
+    std::optional<Segment> closed;
+    if (open_) {
+        closed = take_window(CloseReason::Discontinuity);
+    }
+    reset_automaton();
+    return closed;
+}
+
+std::optional<Segment> VadWindower::flush() {
+    std::optional<Segment> closed;
+    if (open_) {
+        closed = take_window(CloseReason::Flush);
+    }
+    reset_automaton();
+    return closed;
+}
+
+std::optional<Segment> VadWindower::notify_discontinuity() {
+    std::optional<Segment> closed;
+    if (open_) {
+        closed = take_window(CloseReason::Discontinuity);
+    }
+    reset_automaton();
+    pending_discontinuity_ = true;
+    assert(!(pending_discontinuity_ && open_));
+    return closed;
+}
+
 std::optional<Segment> VadWindower::cut_if_full() {
     if (window_probs_.size() < ceiling_frames_) {
         return std::nullopt;
@@ -143,15 +194,7 @@ std::optional<Segment> VadWindower::feed(std::span<const float> frame, float pro
         }
         // The frame that reaches the hangover count closes the window and is not part of it. It
         // seeds the next pre-roll tail, which a hangover close leaves alone.
-        Segment closed{.samples = std::move(window_samples_),
-                       .start = window_start_,
-                       .reason = CloseReason::Hangover,
-                       .continues_previous = current_continues_previous_,
-                       .discontinuous_before = current_discontinuous_before_};
-        window_samples_.clear();
-        window_probs_.clear();
-        open_ = false;
-        silence_frames_ = 0;
+        Segment closed = take_window(CloseReason::Hangover);
         push_tail(tail_samples_, tail_probs_, frame, prob, tail_cap_frames_);
         return closed;
     }
@@ -168,7 +211,7 @@ std::optional<Segment> VadWindower::feed(std::span<const float> frame, float pro
         append_frame(window_samples_, window_probs_, frame, prob);
         silence_frames_ = 0;
         current_continues_previous_ = false;
-        current_discontinuous_before_ = false;
+        current_discontinuous_before_ = std::exchange(pending_discontinuity_, false);
         open_ = true;
         return std::nullopt;
     }
