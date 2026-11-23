@@ -19,3 +19,10 @@
   `fd1ef8864b5fdf0f75cc7d33ec93266709843447183f5883e98dda8686110821`.
 - It is regenerated only on a machine with the local venv (onnxruntime and silero-vad 5.1.2, no torch). Tests and CI
   read the committed text and never run Python.
+
+The n_context difference was measured on 2026-11-23. The fork reflect-pads each frame and carries no previous-frame
+context; the reference prepends the previous 64 samples. Over the 336 frames the maximum difference is 0.2007 (frame
+216) and the mean 0.0021; the single segment's start and end shift by 0 frames, and the one threshold flip (frame 272)
+lies within a frame of a reference edge. The decision is accept: the fork is unchanged. The reflect-context companion
+`clean_en_sample.silero-ref-reflect.txt` (same generator, `--context reflect`) agrees with the fork to 0.0006, which
+attributes the difference to the left context alone. `VadReferenceModel.AcceptedBoundsHold` pins the decision.

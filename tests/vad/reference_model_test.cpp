@@ -340,3 +340,23 @@ TEST(VadReferenceModel, Measure) {
     const Measured m = measure(streams->signal, streams->fork, streams->ref, streams->reflect);
     print_measurement(*streams, m);
 }
+
+// Pins the accepted outcome: the fork's reflect padding stays while its boundaries and threshold
+// flips remain within one frame of the reference. A change to the fork, the model or the reference
+// trace that breaks either half reddens this test on every leg that runs the real model.
+TEST(VadReferenceModel, AcceptedBoundsHold) {
+    if (!model_present()) {
+        GTEST_SKIP() << kMissingModelHint;
+    }
+    auto engine = lws::VadEngine::open(LWS_SILERO_MODEL_PATH);
+    ASSERT_TRUE(engine.has_value());
+    const auto streams = load_streams(*engine);
+    ASSERT_TRUE(streams.has_value()) << streams.error();
+    ASSERT_EQ(integrity_failure(*streams), "");
+
+    const Measured m = measure(streams->signal, streams->fork, streams->ref, streams->reflect);
+    std::cout << nctx_line(m) << '\n';
+
+    EXPECT_TRUE(boundaries_hold(m));
+    EXPECT_TRUE(flips_hold(m));
+}
