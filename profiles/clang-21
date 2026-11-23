@@ -1,0 +1,17 @@
+# Conan profile for the clang-21 toolchain. Every package for this tree resolves through it:
+#   conan install . --profile:all=profiles/clang-21      (scripts/deps.sh runs exactly that)
+# The default Conan profile on this host is gcc 15 / gnu17 and must never resolve packages for
+# this tree: Conan binaries and the compiler must agree.
+
+[settings]
+os=Linux
+arch=x86_64
+build_type=Release
+compiler=clang
+compiler.version=21
+compiler.libcxx=libstdc++11
+compiler.cppstd=23
+
+[conf]
+tools.build:compiler_executables={"c": "clang-21", "cpp": "clang++-21"}
+tools.cmake.cmaketoolchain:generator=Ninja
