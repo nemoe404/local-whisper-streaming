@@ -4,8 +4,9 @@ Real-time speech-to-text on a live audio stream with [whisper.cpp](https://githu
 A lock-free ring buffer takes audio in, a Silero voice-activity detector decides which parts are speech,
 and only those parts reach Whisper. Silence costs (almost) nothing.
 
-> **Status: pre-alpha.** Nothing is implemented yet. This repository currently holds the plan and the
-> build skeleton. See [Roadmap](#roadmap).
+> **Status: pre-alpha.** The pure core, the lock-free ring and the VAD engine are implemented and tested.
+> Segmentation on recorded audio is in progress; the decoder, the streaming API and the CLI are not started.
+> See [Roadmap](#roadmap).
 
 ## Why
 
@@ -19,13 +20,18 @@ audio in ──► ring buffer ──► VAD (Silero, whisper.cpp) ──► spe
   (push)      (lock-free)       open / hangover / close        (pre-roll padded)      (worker thread)
 ```
 
-## What it does
+## What is implemented
 
-- Lock-free single-producer / single-consumer ring for audio pushed from a capture callback.
-- Silero VAD with onset, hangover and minimum-speech thresholds; no inference on silence.
-- Segment assembly with pre-roll padding, so the first syllable is not lost.
-- A worker thread that runs whisper.cpp per segment and emits text events through a callback.
-- Errors as `std::expected`; no exceptions across the public API.
+- **Pure core** (`include/lws`, `src/core`): `Options` with validation, ring index arithmetic, the VAD
+  windower (onset, hangover, pre-roll, ceiling cut with overlap and continuation), and seam merge for
+  repeated words at window joins. No I/O, no threads, no whisper dependency.
+- **Lock-free ring** (`include/lws/spsc_ring.hpp`): single-producer / single-consumer, drop-newest
+  all-or-nothing `push`, counters for offered and dropped samples, and a discontinuity flag. The push path
+  does not allocate, does not block and contains no compare-and-swap.
+- **VAD engine** (`src/shell`): Silero through whisper.cpp's `whisper_vad_*` API only, with a startup
+  frame-size probe, CPU and one thread, and whisper's log routed away from stderr.
+
+Errors are returned as `std::expected`; no exceptions cross the public API.
 
 ## Usage
 
@@ -47,12 +53,16 @@ Requirements: Linux, clang 21, CMake 3.29+, Conan 2. CUDA is optional.
 
 ```sh
 git submodule update --init --recursive
-./scripts/fetch-models.sh silero-v5.1.2   # Silero VAD weights; fetched, never committed
-export LWS_BUILD_ID=dev                   # build/dev/ holds the Conan output and every preset's tree
+./scripts/fetch-models.sh ggml-silero-v5.1.2.bin   # Silero VAD weights; fetched, never committed
+export LWS_BUILD_ID=dev                             # build/dev/ holds the Conan output and every preset's tree
 ./scripts/deps.sh Debug
 cmake --preset asan-ubsan && cmake --build --preset asan-ubsan
 ctest --preset asan-ubsan
 ```
+
+The presets are `release`, `asan-ubsan` and `tsan`. `./scripts/check.sh` runs the full gate: format,
+toolchain, tuning values, core isolation, ring wait-free, models, dependencies, every leg's build and tests,
+cppcheck and clang-tidy.
 
 ## Built on a [whisper.cpp](https://github.com/nemoe404/whisper.cpp/tree/consigliere-v1.9.5) fork
 
@@ -69,11 +79,13 @@ anyone who needs real-time Whisper without the rest.
 
 ## Roadmap
 
-1. Ring buffer and VAD windower as pure value types, tested without mocks.
-2. whisper.cpp shell: model loading, segment decode, worker thread.
-3. Public streamer API and a `lws-cli` that reads raw PCM from stdin
+1. [x] Pure core: options, ring index, VAD windower, seam merge, replayed on plain values.
+2. [x] Lock-free SPSC ring with counters, discontinuity flag and a ThreadSanitizer proof.
+3. [ ] VAD on recorded audio: segments with word onsets intact, golden boundaries, chunking invariance.
+4. [ ] Whisper shell: model loading, per-segment decode, worker thread, timed text events.
+5. [ ] Public streamer API and a `lws-cli` that reads raw PCM from stdin
    (so `pwcap <app> | lws-cli` works).
-4. CI: static gate on hosted runners (CPU build), GPU build by hand.
+6. [ ] CI: static gate on hosted runners (CPU build), GPU build by hand.
 
 ## License
 
