@@ -101,6 +101,14 @@ target_include_directories(lws_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(lws_core PUBLIC fmt::fmt)
 target_link_libraries(lws_core PRIVATE lws_warnings lws_sanitizers)
 
+# lws_shell is the imperative shell: the place whisper.cpp is allowed. lws_core never links it, and its
+# headers stay under src/shell, internal until a public streaming type exists. Globbed like lws_core.
+file(GLOB LWS_SHELL_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/shell/*.cpp)
+add_library(lws_shell STATIC ${LWS_SHELL_SOURCES})
+target_include_directories(lws_shell PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(lws_shell PUBLIC lws_core)
+target_link_libraries(lws_shell PRIVATE whisper lws_warnings lws_sanitizers)
+
 if(LWS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
