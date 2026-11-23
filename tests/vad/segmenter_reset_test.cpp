@@ -39,7 +39,7 @@ lws::Options short_ceiling() { return lws::Options{.max_speech_duration_s = 2.0F
 // One utterance: 20 speech frames, then 30 sub-threshold frames (the hangover is 22).
 std::vector<float> utterance() { return stream_of({{kSpeech, 20}, {kQuiet, 30}}); }
 
-// What the Phase-6 pump will do for one wake-up: pop everything available, push it to the
+// What a pump over the ring will do for one wake-up: pop everything available, push it to the
 // segmenter, then act on the ring's discontinuity flag.
 struct Drained {
     std::vector<lws::Segment> segments;
@@ -114,8 +114,9 @@ OverrunRun run_overrun() {
 
 TEST(SegmenterReset, OneResetAtSessionStart) {
     FakeVadLog log;
-    auto segmenter = make_segmenter(log);
+    const auto created = lws::Segmenter::create(lws::test::fake_engine(log), lws::Options{});
 
+    EXPECT_TRUE(created.has_value());
     EXPECT_EQ(resets(log), 1U);
     const std::vector<FakeCall> expected{
         {FakeCall::Kind::Detect, kFrame},
