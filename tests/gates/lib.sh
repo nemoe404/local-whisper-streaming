@@ -32,6 +32,13 @@ gate_begin() {
         echo "GATE-HARNESS: tests/smoke/zz_seed_* exists; a previous run died. Remove the leftover by hand." >&2
         exit 3
     fi
+    local leftover
+    for leftover in include/lws/zz_seed_* src/core/zz_seed_* tests/core/zz_seed_*; do
+        if compgen -G "$LWS_GATE_ROOT/$leftover" >/dev/null; then
+            echo "GATE-HARNESS: $leftover exists; a previous run died. Remove the leftover by hand." >&2
+            exit 3
+        fi
+    done
     mkdir -p "$GATE_LOGS/gates" "$GATE_LOGS/matrix"
     GATE_TMP=$(mktemp -d)
     GATE_SNAPSHOT="$GATE_TMP/status.before"

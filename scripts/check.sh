@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The gate entry point. Stages in order: format, toolchain (presets), models, deps, then one leg per preset
+# The gate entry point. Stages in order: format, toolchain (presets), tuning values, models, deps, then one leg per preset
 # (configure, toolchain, isa, sanitizer, build, ctest, skip count), then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
@@ -39,6 +39,16 @@ status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/toolchain-gate.cmake" >"$logs/toolchain-presets.log" 2>&1 || status=$?
 if ((status != 0)); then
     echo "check: toolchain gate (presets) failed (exit $status); see $logs/toolchain-presets.log" >&2
+    exit 1
+fi
+
+# Tuning values stay out of constexpr under include/lws (GATE-02). A text scan of the public headers: no
+# configure needed, so it runs before models and deps.
+stage "tuning values (GATE-02)"
+status=0
+cmake -DLWS_ROOT="$root" -P "$root/scripts/tuning-gate.cmake" >"$logs/tuning.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: tuning-values gate failed (exit $status); see $logs/tuning.log" >&2
     exit 1
 fi
 
@@ -160,4 +170,4 @@ if ((status != 0)); then
 fi
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"

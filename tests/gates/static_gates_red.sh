@@ -321,6 +321,26 @@ PY
     mark_red legs-consistency
 }
 
+# GATE-02: the tuning-values gate. The seed names are camel case on purpose: they are the case the
+# gate's lowercase step exists to catch. The gate is a text scan, so a header is never compiled.
+proof_tuning_values() {
+    local rc=0
+    gate_expect_green tuning -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" -P "$LWS_GATE_ROOT/scripts/tuning-gate.cmake" ||
+        return 1
+    mark_green tuning-values
+    gate_write include/lws/zz_seed_tuning.hpp 'inline constexpr float kSeededThreshold = 0.5F;'
+    red_with tuning '[tuning]' 'kSeededThreshold' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/tuning-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_append include/lws/options.hpp 'inline constexpr std::uint32_t kSeededOverlap = 250;'
+    red_with tuning '[tuning]' 'kSeededOverlap' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/tuning-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    mark_red tuning-values
+}
+
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
 if ((${#proof_fns[@]} == 0)); then
     echo "static_gates_red: no proof functions found; refusing to pass an empty run" >&2
