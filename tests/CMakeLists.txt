@@ -39,6 +39,18 @@ foreach(_src IN LISTS LWS_SMOKE_TESTS)
     endif()
 endforeach()
 
+# Pure-core tests: one executable per file, linked against lws_core only (no whisper, no model).
+file(GLOB LWS_CORE_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/core/*_test.cpp)
+foreach(_src IN LISTS LWS_CORE_TESTS)
+    get_filename_component(_stem ${_src} NAME_WE)
+    add_executable(core_${_stem} ${_src})
+    target_link_libraries(core_${_stem} PRIVATE lws_core lws_warnings lws_sanitizers GTest::gtest_main)
+    gtest_discover_tests(core_${_stem}
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES LABELS core TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
+endforeach()
+
 # Gate verdict rows, run in script mode through the same cmake binary that drives the build. The
 # driver includes cmake/Clang21Toolchain.cmake, so the row verdicts and configure share one owner.
 add_test(NAME toolchain_verdict_cases

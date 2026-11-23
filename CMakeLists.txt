@@ -90,6 +90,17 @@ add_library(lws_smoke STATIC src/smoke/lws_smoke.cpp)
 target_include_directories(lws_smoke PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(lws_smoke PRIVATE whisper lws_warnings lws_sanitizers)
 
+# lws_core is the pure core (Phase 2): public headers under include/lws, sources under src/core. It links
+# fmt only: no whisper, spdlog or threads, so the core stays testable without a model. Globbed on
+# purpose, a new src/core/*.cpp is picked up without editing CMake. The preset's clang-21 rule applies
+# unchanged; the target adds no compiler or flag override.
+find_package(fmt CONFIG REQUIRED)
+file(GLOB LWS_CORE_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/core/*.cpp)
+add_library(lws_core STATIC ${LWS_CORE_SOURCES})
+target_include_directories(lws_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(lws_core PUBLIC fmt::fmt)
+target_link_libraries(lws_core PRIVATE lws_warnings lws_sanitizers)
+
 if(LWS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
