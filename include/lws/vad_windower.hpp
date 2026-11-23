@@ -31,12 +31,21 @@ public:
 
 private:
     VadWindower(std::size_t onset_frames, std::size_t hangover_frames, std::size_t pre_roll_frames,
-                float threshold) noexcept;
+                std::size_t ceiling_frames, std::size_t overlap_frames, float threshold) noexcept;
+
+    // Emits the first part of an over-long window, cut at the lowest-probability frame of its last
+    // 1.5 s, and keeps the rest (with the overlap) as the still-open window (CORE-05, CORE-06).
+    [[nodiscard]] Segment cut_at_minimum();
+
+    // Cuts when the open window has reached the ceiling (T-02-04); otherwise returns nothing.
+    [[nodiscard]] std::optional<Segment> cut_if_full();
 
     float threshold_;
     std::size_t onset_frames_;
     std::size_t hangover_frames_;
     std::size_t tail_cap_frames_; // preroll_tail_frames(pre_roll_frames, onset_frames)
+    std::size_t ceiling_frames_;  // ceil(max_speech_duration_s * 1000 / 32) (D3)
+    std::size_t overlap_frames_;  // ms_to_frames_ceil(overlap_ms) (D2)
     std::uint64_t fed_samples_ = 0;
     std::uint64_t window_start_ = 0;
     std::size_t speech_streak_ = 0;
