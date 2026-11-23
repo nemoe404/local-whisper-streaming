@@ -8,6 +8,8 @@
 #include <string>
 #include <utility>
 
+#include "shell/whisper_log.hpp"
+
 namespace lws {
 
 namespace {
@@ -52,6 +54,9 @@ whisper_vad_context_params vad_context_params() noexcept {
 }
 
 std::expected<VadEngine, Error> VadEngine::open(const std::filesystem::path& model) {
+    // First, so the loader's own lines are routed too.
+    install_whisper_log_route();
+
     const std::string path = model.string();
     whisper_vad_context* raw =
         whisper_vad_init_from_file_with_params(path.c_str(), vad_context_params());
