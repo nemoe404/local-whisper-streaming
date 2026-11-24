@@ -1,16 +1,27 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <expected>
+#include <functional>
+#include <future>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <ranges>
 #include <span>
 #include <stop_token>
+#include <string>
+#include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <fmt/format.h>
@@ -18,9 +29,12 @@
 #include "lws/decode_policy.hpp"
 #include "lws/options.hpp"
 #include "lws/segment.hpp"
+#include "lws/streamer.hpp"
+#include "lws/streamer_options.hpp"
 #include "lws/text_event.hpp"
 #include "shell/decoder.hpp"
 #include "shell/segmenter.hpp"
+#include "shell/streamer_impl.hpp"
 #include "shell/vad_engine.hpp"
 #include "vad/fake_vad.hpp"
 #include "vad/segmenter_support.hpp"
@@ -99,17 +113,23 @@ inline std::string position_text(std::uint64_t first_index, std::uint64_t last_i
     return fmt::format("f{} l{}", first_index, last_index);
 }
 
-// A decoder whose text names the first and last frame index of the segment it was given, over one
-// span from the segment's start to its end.
-inline Decoder position_decoder() {
+// The backend behind position_decoder: the text names the first and last frame index of the
+// segment it was given, over one span from the segment's start to its end. `before_run` runs at
+// the top of every decode, with that decode's stop token, so a test can hold a decode.
+inline DecodeBackend
+position_backend(std::move_only_function<void(const std::stop_token&)> before_run = {}) {
     struct State {
         std::size_t size = 0;
         std::uint64_t first = 0;
         std::uint64_t last = 0;
     };
     auto state = std::make_shared<State>();
-    return Decoder{DecodeBackend{
-        .run = [state](std::span<const float> samples, std::stop_token) -> std::int32_t {
+    return DecodeBackend{
+        .run = [state, before_run = std::move(before_run)](
+                   std::span<const float> samples, std::stop_token stop) mutable -> std::int32_t {
+            if (before_run) {
+                before_run(stop);
+            }
             state->size = samples.size();
             state->first = static_cast<std::uint64_t>(samples[1]);
             state->last = static_cast<std::uint64_t>(samples[samples.size() - 511]);
@@ -122,6 +142,75 @@ inline Decoder position_decoder() {
                                              .t1_cs = end_cs,
                                              .text = position_text(state->first, state->last)}};
             },
+    };
+}
+
+// A decoder whose text names the first and last frame index of the segment it was given.
+inline Decoder position_decoder() { return Decoder{position_backend()}; }
+
+// Lets a test hold a decode and watch it start. The decoder thread marks entry; the test waits for
+// it with a bound and decides when to let go. Every wait here also ends on a stop request, so a
+// held decode can never outlive the thread that runs it.
+class DecodeGate {
+public:
+    // Marks entry. The first call also waits for release or a stop request; later calls pass.
+    void enter_first(const std::stop_token& stop) {
+        std::unique_lock lock{mutex_};
+        const bool first = !entered_;
+        entered_ = true;
+        changed_.notify_all();
+        if (first) {
+            std::ignore = changed_.wait(lock, stop, [this] { return released_; });
+        }
+    }
+
+    // Marks entry and waits for a stop request only.
+    void enter_and_wait_for_stop(const std::stop_token& stop) {
+        std::unique_lock lock{mutex_};
+        entered_ = true;
+        changed_.notify_all();
+        std::ignore = changed_.wait(lock, stop, [] { return false; });
+    }
+
+    // False when the bound expires before a decode entered.
+    [[nodiscard]] bool wait_entered(std::chrono::milliseconds bound) {
+        std::unique_lock lock{mutex_};
+        return changed_.wait_for(lock, bound, [this] { return entered_; });
+    }
+
+    void release() {
+        {
+            const std::scoped_lock lock{mutex_};
+            released_ = true;
+        }
+        changed_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable_any changed_;
+    bool entered_ = false;
+    bool released_ = false;
+};
+
+// The position decoder, but its first decode waits until the gate is released.
+inline Decoder gated_position_decoder(DecodeGate& gate) {
+    return Decoder{
+        position_backend([&gate](const std::stop_token& stop) { gate.enter_first(stop); })};
+}
+
+// whisper's code for a run its abort callback ended.
+inline constexpr std::int32_t kWhisperAbort = -6;
+
+// Every decode marks entry and then waits for its stop token, and returns the abort code. It
+// behaves as a decode that only a stop request can end.
+inline Decoder stop_blocking_decoder(DecodeGate& gate) {
+    return Decoder{DecodeBackend{
+        .run = [&gate](std::span<const float>, std::stop_token stop) -> std::int32_t {
+            gate.enter_and_wait_for_stop(stop);
+            return kWhisperAbort;
+        },
+        .spans = [] { return std::vector<RawSpan>{}; },
     }};
 }
 
@@ -135,6 +224,67 @@ inline std::vector<Segment> direct_segments(std::span<const float> stream, std::
         pushed.segments.push_back(std::move(*window));
     }
     return std::move(pushed.segments);
+}
+
+// The reference for a stream that is flushed along the way: what a Segmenter cuts when the stream
+// is fed in pieces of `chunk` samples, split at each flush position and flushed there, then
+// flushed at the end. Positions are sample counts in increasing order.
+inline std::vector<Segment> direct_segments_flushed(std::span<const float> stream,
+                                                    std::size_t chunk,
+                                                    std::span<const std::size_t> flush_positions) {
+    IndexedVadLog log;
+    auto segmenter = Segmenter::create(indexed_engine(log), Options{}).value();
+    std::vector<Segment> segments;
+    const auto flush = [&] {
+        if (auto window = segmenter.flush()) {
+            segments.push_back(std::move(*window));
+        }
+    };
+    const auto feed = [&](std::span<const float> part) {
+        auto pushed = push_chunked(segmenter, part, chunk);
+        std::ranges::move(pushed.segments, std::back_inserter(segments));
+    };
+    std::size_t at = 0;
+    std::ranges::for_each(flush_positions, [&](std::size_t position) {
+        feed(stream.subspan(at, position - at));
+        flush();
+        at = position;
+    });
+    feed(stream.subspan(at));
+    flush();
+    return segments;
+}
+
+// The event a segment must produce with the position decoder: its exact stream range and the
+// frames it holds.
+inline TextEvent expected_text_event(const Segment& segment) {
+    const std::uint64_t end = segment.start + segment.samples.size();
+    return TextEvent{
+        .kind = EventKind::Text,
+        .t_start = segment.start,
+        .t_end = end,
+        .text = position_text(segment.start / kVadFrameSamples, (end / kVadFrameSamples) - 1),
+        .after_gap = false};
+}
+
+inline std::vector<TextEvent> expected_text_events(std::span<const Segment> segments) {
+    return segments | std::views::transform(expected_text_event) | std::ranges::to<std::vector>();
+}
+
+// Runs the body on its own thread and waits for it with a bound. A body that does not finish in
+// time cannot be stopped, so the hang is reported and the process ends: a hang fails fast instead
+// of waiting for the test runner's timeout.
+inline void run_bounded(const char* name, std::chrono::milliseconds bound,
+                        std::move_only_function<void()> body) {
+    std::packaged_task<void()> task{std::move(body)};
+    std::future<void> done = task.get_future();
+    std::jthread worker{std::move(task)};
+    if (done.wait_for(bound) != std::future_status::ready) {
+        std::ignore = std::fprintf(stderr, "STREAMER-HANG %s\n", name);
+        std::abort();
+    }
+    worker.join();
+    done.get();
 }
 
 // Collects the events the callback delivers. record runs on the decoder thread; events is read
@@ -155,5 +305,28 @@ private:
     mutable std::mutex mutex_;
     std::vector<TextEvent> events_;
 };
+
+// A streamer over the indexed engine and the given decoder, with its events going to `events`. The
+// ring and the queue are as large as the caller says. A failure throws, which fails the test.
+inline Streamer make_test_streamer(IndexedVadLog& log, EventLog& events, Decoder decoder,
+                                   std::size_t ring_samples, std::size_t queue_segments = 8) {
+    StreamerOptions options;
+    options.ring_capacity_samples = ring_samples;
+    options.queue_segments = queue_segments;
+    auto streamer =
+        StreamerAccess::assemble(indexed_engine(log), std::move(decoder), options).value();
+    streamer.on_text([&events](const TextEvent& event) noexcept { events.record(event); }).value();
+    return streamer;
+}
+
+// Pushes the stream in pieces of `piece` samples (the last one shorter). False when any push was
+// refused.
+inline bool push_pieces(Streamer& streamer, std::span<const float> stream, std::size_t piece) {
+    return std::ranges::all_of(
+        stream | std::views::chunk(static_cast<std::ptrdiff_t>(piece)), [&](auto samples) {
+            return streamer.push(std::span<const float>{samples.begin(), samples.end()})
+                .has_value();
+        });
+}
 
 } // namespace lws::test

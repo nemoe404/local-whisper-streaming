@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <memory>
 #include <mutex>
@@ -22,6 +23,7 @@
 
 #include "core/event_compose.hpp"
 #include "core/lifecycle.hpp"
+#include "core/pump_schedule.hpp"
 #include "core/segment_fifo.hpp"
 #include "lws/options.hpp"
 #include "lws/segment.hpp"
@@ -122,8 +124,21 @@ public:
         return ring_.push(samples);
     }
 
+    // The target is the count of samples accepted so far. On the producer thread that covers every
+    // push that returned before this call; from another thread it covers whatever push the call is
+    // ordered after. The pump closes the window when it has taken exactly that many samples.
     [[nodiscard]] std::expected<void, Error> flush() {
-        return admit(Control::Flush).transform([](RunState) {});
+        if (const auto next = admit(Control::Flush); !next) {
+            return std::unexpected(next.error());
+        }
+        const std::uint64_t target = ring_.counters().accepted;
+        {
+            const std::scoped_lock lock{pump_mutex_};
+            pending_flushes_.push_back(target);
+            wake_requested_ = true;
+        }
+        pump_wake_.notify_one();
+        return {};
     }
 
     [[nodiscard]] std::expected<void, Error> stop(StopMode mode) {
@@ -135,9 +150,12 @@ public:
         // a ring that is then drained or discarded.
         state_.store(*next, std::memory_order_release);
         if (mode == StopMode::Drain) {
+            // The same count as a flush target, read the same way: the pump drains the ring to it,
+            // closes the open window, and the queue is closed behind that last segment.
+            const std::uint64_t target = ring_.counters().accepted;
             {
                 const std::scoped_lock lock{pump_mutex_};
-                finish_target_ = ring_.counters().accepted;
+                pending_finish_ = target;
                 wake_requested_ = true;
             }
             pump_wake_.notify_one();
@@ -179,11 +197,6 @@ private:
         }
     }
 
-    [[nodiscard]] std::optional<std::uint64_t> finish_target() {
-        const std::scoped_lock lock{pump_mutex_};
-        return finish_target_;
-    }
-
     // Sleeps until a stop request, a wake-up or the poll interval, whichever comes first.
     void idle(const std::stop_token& stop) {
         std::unique_lock lock{pump_mutex_};
@@ -206,38 +219,76 @@ private:
         }
     }
 
-    // The end of the stream: the open window is emitted and the queue is closed, so the decoder
-    // thread ends once it has worked off what is queued.
-    void finish(Segmenter& segmenter) {
+    // Moves the targets the control thread left into the pump's own schedule. Called after the
+    // ring's available count was read, so a flush made before a push that count includes is seen
+    // in the same step.
+    void take_targets(PumpSchedule& schedule, std::uint64_t popped) {
+        const std::scoped_lock lock{pump_mutex_};
+        std::ranges::for_each(pending_flushes_,
+                              [&](std::uint64_t target) { schedule.add_flush(target, popped); });
+        pending_flushes_.clear();
+        if (pending_finish_.has_value()) {
+            schedule.set_finish(*pending_finish_, popped);
+            pending_finish_.reset();
+        }
+    }
+
+    // The window a flush or the end of the stream closes goes to the queue, when there is one.
+    void flush_window(Segmenter& segmenter) {
         if (auto window = segmenter.flush()) {
             queue_.push(std::move(*window));
         }
-        queue_.close();
+    }
+
+    // Acts on every mark due at the samples taken so far. True when the stream ended.
+    bool handle_due(Segmenter& segmenter, PumpSchedule& schedule, std::uint64_t popped,
+                    bool& handled) {
+        bool finished = false;
+        std::ignore = std::ranges::find_if(std::views::iota(0), [&](std::int32_t) {
+            const std::optional<DueMark> due = schedule.take_due(popped);
+            if (!due.has_value()) {
+                return true;
+            }
+            handled = true;
+            switch (due->kind) {
+            case MarkKind::Flush:
+                flush_window(segmenter);
+                return false;
+            case MarkKind::Gap:
+                // Gap marks are added by the overrun path, which does not exist yet.
+                return false;
+            case MarkKind::Finish:
+                // The end of the stream: the open window is emitted and the queue is closed, so
+                // the decoder thread ends once it has worked off what is queued.
+                flush_window(segmenter);
+                queue_.close();
+                finished = true;
+                return true;
+            }
+            return true;
+        });
+        return finished;
     }
 
     // One step of the pump. True ends the thread.
-    bool pump_step(Segmenter& segmenter, std::span<float> scratch, std::uint64_t& popped,
-                   const std::stop_token& stop) {
+    bool pump_step(Segmenter& segmenter, PumpSchedule& schedule, std::span<float> scratch,
+                   std::uint64_t& popped, const std::stop_token& stop) {
         if (stop.stop_requested()) {
             return true;
         }
         const std::size_t available = ring_.available();
-        const std::optional<std::uint64_t> target = finish_target();
-        std::size_t quota = std::min(available, scratch.size());
-        if (target.has_value()) {
-            assert(*target >= popped);
-            quota = std::min<std::size_t>(quota, static_cast<std::size_t>(*target - popped));
-        }
+        take_targets(schedule, popped);
+        const std::size_t quota = schedule.quota(available, scratch.size(), popped);
         if (quota > 0) {
             const std::span<float> piece = scratch.first(quota);
             popped += ring_.pop(piece);
             feed(segmenter, piece);
         }
-        if (target.has_value() && popped == *target) {
-            finish(segmenter);
+        bool handled = false;
+        if (handle_due(segmenter, schedule, popped, handled)) {
             return true;
         }
-        if (quota == 0) {
+        if (quota == 0 && !handled) {
             idle(stop);
         }
         return false;
@@ -245,9 +296,10 @@ private:
 
     void run_pump(Segmenter& segmenter, const std::stop_token& stop) {
         std::vector<float> scratch(kPumpPiece);
+        PumpSchedule schedule;
         std::uint64_t popped = 0;
         std::ignore = std::ranges::find_if(std::views::iota(0), [&](std::int32_t) {
-            return pump_step(segmenter, scratch, popped, stop);
+            return pump_step(segmenter, schedule, scratch, popped, stop);
         });
     }
 
@@ -273,7 +325,8 @@ private:
     SegmentQueue queue_;
     std::mutex pump_mutex_;
     std::condition_variable_any pump_wake_;
-    std::optional<std::uint64_t> finish_target_;
+    std::deque<std::uint64_t> pending_flushes_;
+    std::optional<std::uint64_t> pending_finish_;
     bool wake_requested_ = false;
     std::jthread pump_thread_;
     std::jthread decoder_thread_;
