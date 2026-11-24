@@ -78,6 +78,8 @@ std::expected<DecodeResult, Error> Decoder::decode(const Segment& segment,
 
 std::uint64_t Decoder::whisper_calls() const noexcept { return calls_; }
 
+// whisper's abort callback type takes a non-const void*, so the parameter cannot be const.
+// cppcheck-suppress constParameterCallback ; the pointer type is fixed by whisper_full_params
 bool abort_poll(void* hook) noexcept {
     return static_cast<const AbortHook*>(hook)->token.stop_requested();
 }
