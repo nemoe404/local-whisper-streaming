@@ -40,10 +40,13 @@ foreach(_src IN LISTS LWS_SMOKE_TESTS)
 endforeach()
 
 # Pure-core tests: one executable per file, linked against lws_core only (no whisper, no model).
+# Internal core headers live under src/core, so a test includes them as "core/<name>.hpp" through the
+# src include path; the link line still names lws_core only, so a core test cannot reach shell code.
 file(GLOB LWS_CORE_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/core/*_test.cpp)
 foreach(_src IN LISTS LWS_CORE_TESTS)
     get_filename_component(_stem ${_src} NAME_WE)
     add_executable(core_${_stem} ${_src})
+    target_include_directories(core_${_stem} PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(core_${_stem} PRIVATE lws_core lws_warnings lws_sanitizers GTest::gtest_main)
     gtest_discover_tests(core_${_stem}
         DISCOVERY_MODE PRE_TEST
@@ -127,6 +130,47 @@ foreach(_src IN LISTS LWS_DECODE_TESTS)
         set(_label decode)
     endif()
     gtest_discover_tests(decode_${_stem}
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES LABELS "${_label}" TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
+endforeach()
+
+# Stream tests: one executable per file, linked against lws_shell. Label `stream` means fakes only
+# (no model, no ggml compute). A stem ending in _model_test runs the whisper decoder with four ggml
+# threads beside the Silero engine: it also links whisper and carries the labels real-model and
+# ggml-mt. A stem ending in _release_model_test cannot fit the sanitizer legs' time budget, so it
+# is built on the release leg only and is absent on the others rather than skipped. One executable
+# per file because one stream test replaces the global allocation functions. Support headers in
+# tests/stream are not matched by the glob.
+if("${LWS_SANITIZER}" STREQUAL "off")
+    set(LWS_STREAM_SANITIZER_LEG 0)
+else()
+    set(LWS_STREAM_SANITIZER_LEG 1)
+endif()
+file(GLOB LWS_STREAM_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/stream/*_test.cpp)
+foreach(_src IN LISTS LWS_STREAM_TESTS)
+    get_filename_component(_stem ${_src} NAME_WE)
+    if(_stem MATCHES "_release_model_test$" AND NOT "${LWS_SANITIZER}" STREQUAL "off")
+        continue()
+    endif()
+    add_executable(stream_${_stem} ${_src})
+    target_link_libraries(stream_${_stem} PRIVATE lws_shell lws_warnings lws_sanitizers GTest::gtest_main)
+    target_include_directories(stream_${_stem} PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_compile_definitions(stream_${_stem} PRIVATE
+        LWS_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures/audio"
+        LWS_SILERO_MODEL_PATH="${PROJECT_SOURCE_DIR}/models/ggml-silero-v5.1.2.bin"
+        LWS_WHISPER_MODEL_PATH="${PROJECT_SOURCE_DIR}/models/ggml-${LWS_DECODE_MODEL_NAME}.bin"
+        LWS_WHISPER_MODEL_NAME="${LWS_DECODE_MODEL_NAME}"
+        LWS_DECODE_MAX_WORD_ERRORS=${LWS_DECODE_MAX_WORD_ERRORS}
+        LWS_STREAM_SANITIZER_LEG=${LWS_STREAM_SANITIZER_LEG})
+    if(_stem MATCHES "_model_test$")
+        target_link_libraries(stream_${_stem} PRIVATE whisper)
+        # The separator is escaped so the discovery call keeps one LABELS value with two items.
+        set(_label "real-model\\;ggml-mt")
+    else()
+        set(_label stream)
+    endif()
+    gtest_discover_tests(stream_${_stem}
         DISCOVERY_MODE PRE_TEST
         PROPERTIES LABELS "${_label}" TIMEOUT 120
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})

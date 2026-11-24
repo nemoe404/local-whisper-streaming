@@ -11,8 +11,11 @@ namespace lws {
 // The first four values come from validating the VAD options. The ring reports Overrun. The VAD
 // engine and its probe report VadFailed, ModelLoad and FrameSizeMismatch. The decoder reports
 // DecodeFailed for a run that failed without a stop request, and InvalidDecoderOptions for
-// decoder options that do not hold; a model that cannot be loaded reuses ModelLoad. New values
-// are appended so existing ones keep their numbers.
+// decoder options that do not hold; a model that cannot be loaded reuses ModelLoad. The streamer
+// reports NotRunning for a call that needs a running streamer, AlreadyStarted for a second start, a
+// start after stop (a streamer runs once) and a callback set after start, and
+// InvalidStreamerOptions for streamer options that do not hold. New values are appended so existing
+// ones keep their numbers.
 enum class Error : std::uint8_t {
     InvalidThreshold,
     InvalidDuration,
@@ -23,7 +26,10 @@ enum class Error : std::uint8_t {
     ModelLoad,
     FrameSizeMismatch,
     DecodeFailed,
-    InvalidDecoderOptions
+    InvalidDecoderOptions,
+    NotRunning,
+    AlreadyStarted,
+    InvalidStreamerOptions
 };
 
 // The single owner of the VAD frame size: 512 samples at 16 kHz is 32 ms.

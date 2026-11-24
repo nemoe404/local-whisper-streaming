@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <ranges>
@@ -49,6 +50,7 @@ std::expected<std::vector<Segment>, VadFailure> Segmenter::push(std::span<const 
             closed.push_back(std::move(*segment));
         }
     });
+    fed_samples_ += frames->size() * kVadFrameSamples;
     return closed;
 }
 
@@ -63,5 +65,9 @@ std::optional<Segment> Segmenter::notify_relink() {
 }
 
 std::optional<Segment> Segmenter::flush() { return windower_.flush(); }
+
+std::uint64_t Segmenter::fed_samples() const noexcept { return fed_samples_; }
+
+std::size_t Segmenter::pending() const noexcept { return reader_.pending(); }
 
 } // namespace lws

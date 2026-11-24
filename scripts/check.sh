@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, ring wait-free, vad api, models, deps, then one leg per preset
+# The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, ring wait-free, vad api, threads, models, deps, then one leg per preset
 # (configure, toolchain, isa, sanitizer, build, ctest, skip count), then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
@@ -80,6 +80,16 @@ status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/vad-gate.cmake" >"$logs/vad.log" 2>&1 || status=$?
 if ((status != 0)); then
     echo "check: vad api gate failed (exit $status); see $logs/vad.log" >&2
+    exit 1
+fi
+
+# No recursive mutex anywhere in the tree and no raw thread in the library: workers are jthreads. A text
+# scan: no configure needed.
+stage "threads"
+status=0
+cmake -DLWS_ROOT="$root" -P "$root/scripts/threads-gate.cmake" >"$logs/threads.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: threads gate failed (exit $status); see $logs/threads.log" >&2
     exit 1
 fi
 
@@ -202,4 +212,4 @@ if ((status != 0)); then
 fi
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,core-isolation,ring-wait-free,vad-api,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,core-isolation,ring-wait-free,vad-api,threads,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
