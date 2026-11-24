@@ -7,9 +7,12 @@
 // Public core header. No whisper, spdlog or thread type crosses it.
 namespace lws {
 
-// One flat error channel for core validation and, later, shell calls. Trivially copyable.
-// The shell uses the last four: Overrun by the ring; VadFailed, ModelLoad and the frame-size
-// mismatch by the VAD engine and its probe.
+// One flat error channel for core validation and shell calls. Trivially copyable.
+// The first four values come from validating the VAD options. The ring reports Overrun. The VAD
+// engine and its probe report VadFailed, ModelLoad and FrameSizeMismatch. The decoder reports
+// DecodeFailed for a run that failed without a stop request, and InvalidDecoderOptions for
+// decoder options that do not hold; a model that cannot be loaded reuses ModelLoad. New values
+// are appended so existing ones keep their numbers.
 enum class Error : std::uint8_t {
     InvalidThreshold,
     InvalidDuration,
@@ -18,7 +21,9 @@ enum class Error : std::uint8_t {
     Overrun,
     VadFailed,
     ModelLoad,
-    FrameSizeMismatch
+    FrameSizeMismatch,
+    DecodeFailed,
+    InvalidDecoderOptions
 };
 
 // The single owner of the VAD frame size: 512 samples at 16 kHz is 32 ms.
