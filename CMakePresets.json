@@ -36,12 +36,26 @@
       "inherits": "base",
       "displayName": "Debug with ThreadSanitizer",
       "cacheVariables": { "LWS_SANITIZER": "tsan" }
+    },
+    {
+      "name": "cuda",
+      "inherits": "release",
+      "displayName": "Release with CUDA (clang 21 host, built by hand, never a check.sh leg)",
+      "vendor": { "lws": { "hand-run": true } },
+      "cacheVariables": {
+        "GGML_CUDA": "ON",
+        "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
+        "CMAKE_CUDA_HOST_COMPILER": "clang++-21",
+        "CMAKE_CUDA_STANDARD": "17",
+        "CMAKE_CUDA_ARCHITECTURES": "86-real"
+      }
     }
   ],
   "buildPresets": [
     { "name": "release", "configurePreset": "release" },
     { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
-    { "name": "tsan", "configurePreset": "tsan" }
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "cuda", "configurePreset": "cuda" }
   ],
   "testPresets": [
     {
@@ -68,6 +82,12 @@
       "environment": {
         "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1"
       }
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "cuda",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
     }
   ]
 }
