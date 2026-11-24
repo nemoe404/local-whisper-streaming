@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <span>
@@ -48,11 +50,19 @@ public:
     // scored.
     [[nodiscard]] std::optional<Segment> flush();
 
+    // Samples of whole frames handed to the windower so far. It is what the windower has seen and
+    // is never reset: an overrun, a failed call and a flush leave it alone.
+    [[nodiscard]] std::uint64_t fed_samples() const noexcept;
+    // The reader's buffered partial frame, forwarded. Together with the pump's counts, fed_samples
+    // gives the offset from windower time to offered-stream time.
+    [[nodiscard]] std::size_t pending() const noexcept;
+
 private:
     Segmenter(ChunkReader reader, VadWindower windower) noexcept;
 
     ChunkReader reader_;
     VadWindower windower_;
+    std::uint64_t fed_samples_ = 0;
 };
 
 } // namespace lws

@@ -25,6 +25,7 @@
 #include "core/lifecycle.hpp"
 #include "core/pump_schedule.hpp"
 #include "core/segment_fifo.hpp"
+#include "core/stream_clock.hpp"
 #include "lws/options.hpp"
 #include "lws/segment.hpp"
 #include "lws/spsc_ring.hpp"
@@ -43,6 +44,23 @@ namespace {
 // Samples the pump takes from the ring in one step. It bounds how far an overrun can be misplaced,
 // how long a stop waits inside one VAD call, and the size of the scratch buffer.
 constexpr std::size_t kPumpPiece = 4 * kVadFrameSamples;
+
+// What the pump keeps between steps: its scratch buffer, the positions it waits at, the samples it
+// has taken from the ring and the dropped samples attributed to a gap so far.
+struct PumpState {
+    std::vector<float> scratch = std::vector<float>(kPumpPiece);
+    PumpSchedule schedule;
+    std::uint64_t popped = 0;
+    std::uint64_t skew = 0;
+};
+
+// The four counts that put the windower's next frame in the offered stream.
+StreamPosition position_of(const Segmenter& segmenter, const PumpState& state) {
+    return {.popped = state.popped,
+            .skew = state.skew,
+            .pending = segmenter.pending(),
+            .fed = segmenter.fed_samples()};
+}
 
 void deliver(TextCallback& callback, const TextEvent& event) {
     if (callback) {
@@ -204,18 +222,21 @@ private:
         wake_requested_ = false;
     }
 
-    // Segments that closed go to the queue in order. A failed detection hands back the window that
-    // was open, closed as it stood, so speech already collected is not lost.
-    void feed(Segmenter& segmenter, std::span<const float> samples) {
+    // Segments that closed go to the queue in order, each placed in the offered stream by the
+    // offset taken before this call. A failed detection hands back the window that was open, closed
+    // as it stood, so speech already collected is not lost; it belongs to the stream before the
+    // lost frames, so it gets the same offset.
+    void feed(Segmenter& segmenter, std::span<const float> samples, std::uint64_t offset) {
         auto closed = segmenter.push(samples);
         if (closed) {
-            std::ranges::for_each(*closed,
-                                  [this](Segment& segment) { queue_.push(std::move(segment)); });
+            std::ranges::for_each(*closed, [this, offset](Segment& segment) {
+                queue_.push(stamped(std::move(segment), offset));
+            });
             return;
         }
         auto& failure = closed.error();
         if (failure.force_closed.has_value()) {
-            queue_.push(std::move(*failure.force_closed));
+            queue_.push(stamped(std::move(*failure.force_closed), offset));
         }
     }
 
@@ -234,25 +255,25 @@ private:
     }
 
     // The window a flush or the end of the stream closes goes to the queue, when there is one.
-    void flush_window(Segmenter& segmenter) {
+    void flush_window(Segmenter& segmenter, const PumpState& state) {
+        const std::uint64_t offset = stream_offset(position_of(segmenter, state));
         if (auto window = segmenter.flush()) {
-            queue_.push(std::move(*window));
+            queue_.push(stamped(std::move(*window), offset));
         }
     }
 
     // Acts on every mark due at the samples taken so far. True when the stream ended.
-    bool handle_due(Segmenter& segmenter, PumpSchedule& schedule, std::uint64_t popped,
-                    bool& handled) {
+    bool handle_due(Segmenter& segmenter, PumpState& state, bool& handled) {
         bool finished = false;
         std::ignore = std::ranges::find_if(std::views::iota(0), [&](std::int32_t) {
-            const std::optional<DueMark> due = schedule.take_due(popped);
+            const std::optional<DueMark> due = state.schedule.take_due(state.popped);
             if (!due.has_value()) {
                 return true;
             }
             handled = true;
             switch (due->kind) {
             case MarkKind::Flush:
-                flush_window(segmenter);
+                flush_window(segmenter, state);
                 return false;
             case MarkKind::Gap:
                 // Gap marks are added by the overrun path, which does not exist yet.
@@ -260,7 +281,7 @@ private:
             case MarkKind::Finish:
                 // The end of the stream: the open window is emitted and the queue is closed, so
                 // the decoder thread ends once it has worked off what is queued.
-                flush_window(segmenter);
+                flush_window(segmenter, state);
                 queue_.close();
                 finished = true;
                 return true;
@@ -270,22 +291,29 @@ private:
         return finished;
     }
 
+    // Takes `quota` samples from the ring and feeds them to the Segmenter. The offset is read
+    // before the call, while the counts still describe the samples the Segmenter has seen.
+    void pop_and_feed(Segmenter& segmenter, PumpState& state, std::size_t quota) {
+        const std::span<float> piece = std::span<float>{state.scratch}.first(quota);
+        const std::uint64_t offset = stream_offset(position_of(segmenter, state));
+        state.popped += ring_.pop(piece);
+        feed(segmenter, piece, offset);
+    }
+
     // One step of the pump. True ends the thread.
-    bool pump_step(Segmenter& segmenter, PumpSchedule& schedule, std::span<float> scratch,
-                   std::uint64_t& popped, const std::stop_token& stop) {
+    bool pump_step(Segmenter& segmenter, PumpState& state, const std::stop_token& stop) {
         if (stop.stop_requested()) {
             return true;
         }
         const std::size_t available = ring_.available();
-        take_targets(schedule, popped);
-        const std::size_t quota = schedule.quota(available, scratch.size(), popped);
+        take_targets(state.schedule, state.popped);
+        const std::size_t quota =
+            state.schedule.quota(available, state.scratch.size(), state.popped);
         if (quota > 0) {
-            const std::span<float> piece = scratch.first(quota);
-            popped += ring_.pop(piece);
-            feed(segmenter, piece);
+            pop_and_feed(segmenter, state, quota);
         }
         bool handled = false;
-        if (handle_due(segmenter, schedule, popped, handled)) {
+        if (handle_due(segmenter, state, handled)) {
             return true;
         }
         if (quota == 0 && !handled) {
@@ -295,12 +323,9 @@ private:
     }
 
     void run_pump(Segmenter& segmenter, const std::stop_token& stop) {
-        std::vector<float> scratch(kPumpPiece);
-        PumpSchedule schedule;
-        std::uint64_t popped = 0;
-        std::ignore = std::ranges::find_if(std::views::iota(0), [&](std::int32_t) {
-            return pump_step(segmenter, schedule, scratch, popped, stop);
-        });
+        PumpState state;
+        std::ignore = std::ranges::find_if(
+            std::views::iota(0), [&](std::int32_t) { return pump_step(segmenter, state, stop); });
     }
 
     void run_decoder(Decoder& decoder, TextCallback& callback, const std::stop_token& stop) {

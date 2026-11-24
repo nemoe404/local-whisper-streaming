@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -19,6 +20,7 @@
 #include <span>
 #include <stop_token>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -113,6 +115,28 @@ inline VadEngine indexed_engine(IndexedVadLog& log) {
 
 inline std::string position_text(std::uint64_t first_index, std::uint64_t last_index) {
     return fmt::format("f{} l{}", first_index, last_index);
+}
+
+// The first and last frame index a position text names.
+struct FrameRange {
+    std::uint64_t first = 0;
+    std::uint64_t last = 0;
+};
+
+// Reads back what position_text wrote. Text that does not have that shape gives {0, 0}, which no
+// test stream's utterance has as its range except one that really starts and ends at frame 0.
+inline FrameRange frame_range_of(const std::string& text) {
+    if (text.size() < 4 || text.front() != 'f') {
+        return {};
+    }
+    FrameRange range;
+    const char* const end = text.data() + text.size();
+    const auto first = std::from_chars(text.data() + 1, end, range.first);
+    if (first.ec != std::errc{} || first.ptr + 2 > end) {
+        return {};
+    }
+    std::ignore = std::from_chars(first.ptr + 2, end, range.last);
+    return range;
 }
 
 // The backend behind position_decoder: the text names the first and last frame index of the
