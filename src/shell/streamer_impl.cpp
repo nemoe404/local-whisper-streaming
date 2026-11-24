@@ -224,9 +224,12 @@ private:
 
     // Segments that closed go to the queue in order, each placed in the offered stream by the
     // offset taken before this call. A failed detection hands back the window that was open, closed
-    // as it stood, so speech already collected is not lost; it belongs to the stream before the
-    // lost frames, so it gets the same offset.
-    void feed(Segmenter& segmenter, std::span<const float> samples, std::uint64_t offset) {
+    // as it stood. That window holds speech collected before the loss, so it gets the same offset
+    // and goes to the queue ahead of the report of the lost frames. A VAD failure does not mark the
+    // next segment as following a gap: the lost range is in the report itself.
+    void feed(Segmenter& segmenter, std::span<const float> samples, const StreamPosition& before,
+              const PumpState& state) {
+        const std::uint64_t offset = stream_offset(before);
         auto closed = segmenter.push(samples);
         if (closed) {
             std::ranges::for_each(*closed, [this, offset](Segment& segment) {
@@ -238,6 +241,7 @@ private:
         if (failure.force_closed.has_value()) {
             queue_.push(stamped(std::move(*failure.force_closed), offset));
         }
+        queue_.push(vad_failure_notice(before, position_of(segmenter, state)));
     }
 
     // Moves the targets the control thread left into the pump's own schedule. Called after the
@@ -312,13 +316,13 @@ private:
         return finished;
     }
 
-    // Takes `quota` samples from the ring and feeds them to the Segmenter. The offset is read
-    // before the call, while the counts still describe the samples the Segmenter has seen.
+    // Takes `quota` samples from the ring and feeds them to the Segmenter. The position is read
+    // before the pop, while the counts still describe the samples the Segmenter has seen.
     void pop_and_feed(Segmenter& segmenter, PumpState& state, std::size_t quota) {
         const std::span<float> piece = std::span<float>{state.scratch}.first(quota);
-        const std::uint64_t offset = stream_offset(position_of(segmenter, state));
+        const StreamPosition before = position_of(segmenter, state);
         state.popped += ring_.pop(piece);
-        feed(segmenter, piece, offset);
+        feed(segmenter, piece, before, state);
     }
 
     // One step of the pump. True ends the thread.

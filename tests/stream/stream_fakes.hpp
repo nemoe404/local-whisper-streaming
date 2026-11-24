@@ -83,6 +83,12 @@ struct IndexedVadLog {
     std::size_t resets = 0;
 };
 
+// The calls the engine failed, in order.
+inline std::vector<IndexedVadLog::Call> failed_calls(const IndexedVadLog& log) {
+    return log.calls | std::views::filter(&IndexedVadLog::Call::failed) |
+           std::ranges::to<std::vector>();
+}
+
 // A frame whose sample 0 is this scores as silence, and makes the indexed engine's detect call
 // wait, once, until the test releases it. It holds the pump inside the VAD while the test fills the
 // ring.
