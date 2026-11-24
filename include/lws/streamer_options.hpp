@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <expected>
 #include <filesystem>
 
 // Public header. No whisper, spdlog or thread type crosses it. Every default is a member
@@ -31,5 +32,12 @@ struct StreamerOptions {
     // an event that already waits for the speaker to stop.
     std::chrono::milliseconds poll{32};
 };
+
+// Returns the options unchanged when they hold, or the first violated rule, checked in this order:
+// the voice-detection options (their error as it is), the decoder options (their error as it is),
+// then the streamer's own fields, which all give Error::InvalidStreamerOptions: a ring smaller than
+// one VAD frame (512 samples), a queue of 0 segments, and a poll outside 1 to 1000 ms. Create runs
+// this before it opens either model.
+[[nodiscard]] std::expected<StreamerOptions, Error> validate(const StreamerOptions& options);
 
 } // namespace lws

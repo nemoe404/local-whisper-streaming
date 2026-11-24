@@ -1,6 +1,7 @@
 #include "shell/streamer_impl.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -20,6 +21,7 @@
 #include <vector>
 
 #include "core/event_compose.hpp"
+#include "core/lifecycle.hpp"
 #include "core/segment_fifo.hpp"
 #include "lws/options.hpp"
 #include "lws/segment.hpp"
@@ -84,12 +86,24 @@ public:
           segmenter_{std::move(segmenter)}, decoder_{std::move(decoder)},
           queue_{options.queue_segments} {}
 
-    void on_text(TextCallback callback) { callback_ = std::move(callback); }
-
-    void start() {
-        if (!segmenter_ || !decoder_) {
-            return;
+    // Every public call goes through the lifecycle table first: one atomic load of the run state
+    // and the pure transition. A refused call changes nothing.
+    [[nodiscard]] std::expected<void, Error> on_text(TextCallback callback) {
+        if (const auto next = admit(Control::SetCallback); !next) {
+            return std::unexpected(next.error());
         }
+        callback_ = std::move(callback);
+        return {};
+    }
+
+    [[nodiscard]] std::expected<void, Error> start() {
+        const auto next = admit(Control::Start);
+        if (!next) {
+            return std::unexpected(next.error());
+        }
+        assert(segmenter_ && decoder_);
+        // Stored before anything launches, so a push that races the start is already admitted.
+        state_.store(*next, std::memory_order_release);
         decoder_thread_ = std::jthread{
             [this, decoder = std::move(*decoder_), callback = std::move(callback_)](
                 const std::stop_token& stop) mutable { run_decoder(decoder, callback, stop); }};
@@ -98,13 +112,28 @@ public:
                              const std::stop_token& stop) mutable { run_pump(segmenter, stop); }};
         decoder_.reset();
         segmenter_.reset();
+        return {};
     }
 
     [[nodiscard]] std::expected<void, Error> push(std::span<const float> samples) noexcept {
+        if (const auto next = admit(Control::Push); !next) {
+            return std::unexpected(next.error());
+        }
         return ring_.push(samples);
     }
 
-    void stop(StopMode mode) {
+    [[nodiscard]] std::expected<void, Error> flush() {
+        return admit(Control::Flush).transform([](RunState) {});
+    }
+
+    [[nodiscard]] std::expected<void, Error> stop(StopMode mode) {
+        const auto next = admit(Control::Stop);
+        if (!next) {
+            return std::unexpected(next.error());
+        }
+        // Stored before the threads are told, so a push that races the stop is refused or lands in
+        // a ring that is then drained or discarded.
+        state_.store(*next, std::memory_order_release);
         if (mode == StopMode::Drain) {
             {
                 const std::scoped_lock lock{pump_mutex_};
@@ -112,15 +141,38 @@ public:
                 wake_requested_ = true;
             }
             pump_wake_.notify_one();
+            join(pump_thread_);
+            join(decoder_thread_);
         } else {
-            pump_thread_.request_stop();
-            decoder_thread_.request_stop();
+            stop_now();
         }
+        return {};
+    }
+
+    // Destruction is an immediate stop from any state.
+    ~Impl() { stop_now(); }
+
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+
+private:
+    [[nodiscard]] std::expected<RunState, Error> admit(Control call) const noexcept {
+        return next_state(state_.load(std::memory_order_acquire), call);
+    }
+
+    // Asks both threads to end and joins them; queued work is dropped with the impl. The calling
+    // thread must be neither of them, or the join would wait on itself.
+    void stop_now() {
+        assert(std::this_thread::get_id() != pump_thread_.get_id());
+        assert(std::this_thread::get_id() != decoder_thread_.get_id());
+        pump_thread_.request_stop();
+        decoder_thread_.request_stop();
         join(pump_thread_);
         join(decoder_thread_);
     }
 
-private:
     static void join(std::jthread& thread) {
         if (thread.joinable()) {
             thread.join();
@@ -210,6 +262,9 @@ private:
         });
     }
 
+    static_assert(std::atomic<RunState>::is_always_lock_free);
+
+    std::atomic<RunState> state_{RunState::Created};
     std::chrono::milliseconds poll_;
     SpscRing ring_;
     std::optional<Segmenter> segmenter_;
@@ -226,6 +281,9 @@ private:
 
 std::expected<Streamer, Error> StreamerAccess::assemble(VadEngine engine, Decoder decoder,
                                                         const StreamerOptions& options) {
+    if (const auto valid = validate(options); !valid) {
+        return std::unexpected(valid.error());
+    }
     auto segmenter = Segmenter::create(std::move(engine), options.vad);
     if (!segmenter) {
         return std::unexpected(segmenter.error());
@@ -235,6 +293,9 @@ std::expected<Streamer, Error> StreamerAccess::assemble(VadEngine engine, Decode
 }
 
 std::expected<Streamer, Error> Streamer::create(const StreamerOptions& options) {
+    if (const auto valid = validate(options); !valid) {
+        return std::unexpected(valid.error());
+    }
     auto engine = VadEngine::open(options.vad_model_path);
     if (!engine) {
         return std::unexpected(engine.error());
@@ -256,14 +317,12 @@ Streamer::~Streamer() = default;
 
 std::expected<void, Error> Streamer::on_text(TextCallback callback) {
     assert(impl_);
-    impl_->on_text(std::move(callback));
-    return {};
+    return impl_->on_text(std::move(callback));
 }
 
 std::expected<void, Error> Streamer::start() {
     assert(impl_);
-    impl_->start();
-    return {};
+    return impl_->start();
 }
 
 std::expected<void, Error> Streamer::push(std::span<const float> samples) noexcept {
@@ -273,13 +332,12 @@ std::expected<void, Error> Streamer::push(std::span<const float> samples) noexce
 
 std::expected<void, Error> Streamer::flush() {
     assert(impl_);
-    return {};
+    return impl_->flush();
 }
 
 std::expected<void, Error> Streamer::stop(StopMode mode) {
     assert(impl_);
-    impl_->stop(mode);
-    return {};
+    return impl_->stop(mode);
 }
 
 } // namespace lws
