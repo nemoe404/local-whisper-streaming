@@ -139,7 +139,6 @@ anyone who needs real-time Whisper without the rest.
    overrun and VAD-failure reports, a thread gate.
 6. [x] Public streamer API (`lws::Streamer`, pimpl header, no thread type in `include/lws`).
 7. [ ] `lws-cli` that reads raw PCM from stdin (so `pwcap <app> | lws-cli` works), and the install check.
-8. [ ] CI: static gate on hosted runners (CPU build), GPU build by hand.
 
 ## License
 
