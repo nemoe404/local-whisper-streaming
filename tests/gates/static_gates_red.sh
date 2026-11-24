@@ -172,6 +172,34 @@ proof_toolchain_seed_clang20() {
     mark_red toolchain-seed-clang20
 }
 
+# A preset that turns CUDA on must pin the clang 21 host, an nvcc and explicit architectures. Each seed breaks
+# one pin and is restored before the next. The static layer reads text only, so no toolkit is needed.
+proof_toolchain_cuda_preset() {
+    local seed name preset
+    gate_expect_green toolchain-cuda-preset -- toolchain_static || return 1
+    mark_green toolchain-cuda-preset
+    local -A seeds=(
+        [seed-cuda-gcc-host]='{"name": "seed-cuda-gcc-host", "inherits": "cuda", "cacheVariables": {"CMAKE_CUDA_HOST_COMPILER": "g++"}}'
+        [seed-cuda-unpinned]='{"name": "seed-cuda-unpinned", "inherits": "release", "cacheVariables": {"GGML_CUDA": "ON", "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc", "CMAKE_CUDA_ARCHITECTURES": "86-real"}}'
+        [seed-cuda-native]='{"name": "seed-cuda-native", "inherits": "cuda", "cacheVariables": {"CMAKE_CUDA_ARCHITECTURES": "native"}}'
+        [seed-cuda-no-nvcc]='{"name": "seed-cuda-no-nvcc", "inherits": "release", "cacheVariables": {"GGML_CUDA": "ON", "CMAKE_CUDA_HOST_COMPILER": "clang++-21", "CMAKE_CUDA_ARCHITECTURES": "86-real"}}'
+    )
+    local -A tokens=(
+        [seed-cuda-gcc-host]='CMAKE_CUDA_HOST_COMPILER'
+        [seed-cuda-unpinned]='is not set'
+        [seed-cuda-native]='CMAKE_CUDA_ARCHITECTURES'
+        [seed-cuda-no-nvcc]='CMAKE_CUDA_COMPILER'
+    )
+    for name in seed-cuda-gcc-host seed-cuda-unpinned seed-cuda-native seed-cuda-no-nvcc; do
+        seed=${seeds[$name]}
+        preset="[toolchain][preset $name]"
+        gate_write CMakeUserPresets.json "{\"version\": 6, \"configurePresets\": [$seed]}"
+        red_with "toolchain-cuda-preset-$name" "$preset" "${tokens[$name]}" -- toolchain_static || return 1
+        gate_restore_now || return 1
+    done
+    mark_red toolchain-cuda-preset
+}
+
 proof_toolchain_configure() {
     prepare asan-ubsan || return 1
     gate_expect_green toolchain-configure -- cmake --preset asan-ubsan || return 1
@@ -319,6 +347,37 @@ PY
     rm -rf -- "$dir"
     ((rc == 0)) || return 1
     mark_red legs-consistency
+}
+
+# The seeds turn the CUDA preset back into a counted preset (the hand-run marker flipped to false), and then
+# into one with a malformed marker (a string where a boolean belongs). The first must make the leg sets differ
+# and name the preset; the second must stop the script with its own parse error, never drop a leg quietly.
+proof_legs_hand_run() {
+    local source=${LWS_LEGS_AGENTS_MD:-$LWS_GATE_ROOT/AGENTS.md} dir legs rc=0
+    dir=$(mktemp -d)
+    if [[ ! -f $source ]]; then
+        legs=$(sed -n 's/^Decision: legs = //p' measurements/ctest-legs.md)
+        printf 'ctest legs: %s\n' "$legs" >"$dir/fixture.md"
+        source=$dir/fixture.md
+        echo "NOTE legs-hand-run: AGENTS.md is absent; proving on a fixture built from the decision line"
+    fi
+    gate_expect_green legs-hand-run -- env "LWS_LEGS_AGENTS_MD=$source" tests/gates/legs_consistency.sh || rc=1
+    if ((rc == 0)); then
+        mark_green legs-hand-run
+        gate_patch_replace CMakePresets.json '"hand-run": true' '"hand-run": false'
+        red_with legs-hand-run LEGS-DIFFER cuda -- env "LWS_LEGS_AGENTS_MD=$source" \
+            tests/gates/legs_consistency.sh || rc=1
+        gate_restore_now || rc=1
+    fi
+    if ((rc == 0)); then
+        gate_patch_replace CMakePresets.json '"hand-run": true' '"hand-run": "yes"'
+        red_with legs-hand-run-type 'legs_consistency:' 'hand-run' -- env "LWS_LEGS_AGENTS_MD=$source" \
+            tests/gates/legs_consistency.sh || rc=1
+        gate_restore_now || rc=1
+    fi
+    rm -rf -- "$dir"
+    ((rc == 0)) || return 1
+    mark_red legs-hand-run
 }
 
 # The tuning-values gate. The seed names are camel case on purpose: they are the case the

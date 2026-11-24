@@ -5,10 +5,14 @@
 # Two layers, one verdict. The static layer (always runs) reads every non-hidden configure preset in
 # CMakePresets.json and, when present, CMakeUserPresets.json; it resolves inherits (the preset's own
 # value, else the first parent in inherits order that has one) and checks CMAKE_C_COMPILER,
-# CMAKE_CXX_COMPILER, CMAKE_CUDA_HOST_COMPILER when set, and toolchainFile. The configured layer (only
-# when LWS_LEGS is given) reads the compiler identity CMake recorded for each leg and the compiler of
+# CMAKE_CXX_COMPILER and toolchainFile. A preset that turns GGML_CUDA on (anything but OFF, FALSE, 0, NO
+# or N; a value that is not readable as a string counts as on) must also pin CMAKE_CUDA_HOST_COMPILER to
+# clang++-21, CMAKE_CUDA_COMPILER to an nvcc, and CMAKE_CUDA_ARCHITECTURES to explicit values, never
+# native; a preset with CUDA off still has its CUDA host checked when one is set. The configured layer
+# (only when LWS_LEGS is given) reads the compiler identity CMake recorded for each leg and the compiler of
 # every compile-database entry, and feeds the identity through lws_clang21_verdict, the same function
-# configure runs (cmake/Clang21Toolchain.cmake).
+# configure runs (cmake/Clang21Toolchain.cmake). A leg with CUDA on also has its recorded nvcc and CUDA
+# host identity checked, and every nvcc compile-database entry must name a clang 21 host (-ccbin).
 #
 # Exit: 0 holds; 1 refusal (a preset or a leg resolves to something other than clang 21); 2 missing
 # input. A refusal outranks missing input: a leg whose configure stopped at the verdict has compiler-ID
@@ -127,6 +131,24 @@ function(lws_tg_resolve_field out_found out_value name key depth docA docB)
     endforeach()
 endfunction()
 
+# lws_tg_is_clang21(<out_var> <path>): TRUE when <path> names clang-21 or clang++-21 by file name, or
+# resolves to a file under the LLVM 21 install directory.
+function(lws_tg_is_clang21 out_var path)
+    set(${out_var} FALSE PARENT_SCOPE)
+    if("${path}" STREQUAL "")
+        return()
+    endif()
+    get_filename_component(_base "${path}" NAME)
+    if("${_base}" STREQUAL "clang-${LWS_LLVM_MAJOR}" OR "${_base}" STREQUAL "clang++-${LWS_LLVM_MAJOR}")
+        set(${out_var} TRUE PARENT_SCOPE)
+    elseif("${path}" MATCHES "/")
+        get_filename_component(_real "${path}" REALPATH)
+        if("${_real}" MATCHES "^/usr/lib/llvm-${LWS_LLVM_MAJOR}/")
+            set(${out_var} TRUE PARENT_SCOPE)
+        endif()
+    endif()
+endfunction()
+
 # ---------------------------------------------------------------------------------------------
 # Static layer: the declared presets.
 
@@ -209,9 +231,48 @@ foreach(_tg_slot IN ITEMS a b)
             list(APPEND LWS_TG_REFUSALS "${_p} CMAKE_CXX_COMPILER is '${_v}', not ${LWS_TG_EXPECTED_CXX}")
         endif()
 
-        # The CUDA host is optional (no preset enables CUDA yet); when set it must be clang.
+        # CUDA. A preset that turns GGML_CUDA on must pin the CUDA host, the CUDA compiler and the GPU
+        # architecture; a preset that leaves it off keeps the rule that a CUDA host, when set, is clang.
+        # A GGML_CUDA that is not found is off. One that is found but holds no readable non-empty string
+        # (a JSON boolean, an object without a string value) is treated as on, so the pins are required.
+        lws_tg_resolve_field(_f _v "${_tg_name}" "cacheVariables;GGML_CUDA" 0 "${_tg_doc_a}" "${_tg_doc_b}")
+        set(_tg_cuda_on FALSE)
+        if(_f)
+            string(STRIP "${_v}" _tg_cuda_val)
+            if("${_tg_cuda_val}" STREQUAL "" OR NOT "${_tg_cuda_val}" MATCHES "^([Oo][Ff][Ff]|[Ff][Aa][Ll][Ss][Ee]|0|[Nn][Oo]|[Nn])$")
+                set(_tg_cuda_on TRUE)
+            endif()
+        endif()
+
         lws_tg_resolve_field(_f _v "${_tg_name}" "cacheVariables;CMAKE_CUDA_HOST_COMPILER" 0 "${_tg_doc_a}" "${_tg_doc_b}")
-        if(_f AND NOT "${_v}" STREQUAL "${LWS_TG_EXPECTED_CXX}")
+        if(_tg_cuda_on)
+            if(NOT _f)
+                list(APPEND LWS_TG_REFUSALS
+                    "${_p} CMAKE_CUDA_HOST_COMPILER is not set (expected ${LWS_TG_EXPECTED_CXX} for a CUDA preset)")
+            elseif(NOT "${_v}" STREQUAL "${LWS_TG_EXPECTED_CXX}")
+                list(APPEND LWS_TG_REFUSALS
+                    "${_p} CMAKE_CUDA_HOST_COMPILER is '${_v}', not ${LWS_TG_EXPECTED_CXX} (CUDA with a non-clang host)")
+            endif()
+
+            lws_tg_resolve_field(_f _v "${_tg_name}" "cacheVariables;CMAKE_CUDA_COMPILER" 0 "${_tg_doc_a}" "${_tg_doc_b}")
+            get_filename_component(_tg_nvcc_base "${_v}" NAME)
+            if(NOT _f OR "${_v}" STREQUAL "")
+                list(APPEND LWS_TG_REFUSALS
+                    "${_p} CMAKE_CUDA_COMPILER is not set (expected an nvcc for a CUDA preset)")
+            elseif(NOT "${_tg_nvcc_base}" STREQUAL "nvcc")
+                list(APPEND LWS_TG_REFUSALS "${_p} CMAKE_CUDA_COMPILER is '${_v}', not an nvcc")
+            endif()
+
+            lws_tg_resolve_field(_f _v "${_tg_name}" "cacheVariables;CMAKE_CUDA_ARCHITECTURES" 0 "${_tg_doc_a}" "${_tg_doc_b}")
+            string(STRIP "${_v}" _tg_arch)
+            if(NOT _f OR "${_tg_arch}" STREQUAL "")
+                list(APPEND LWS_TG_REFUSALS
+                    "${_p} CMAKE_CUDA_ARCHITECTURES is not set (expected explicit architectures for a CUDA preset)")
+            elseif("${_tg_arch}" MATCHES "[Nn][Aa][Tt][Ii][Vv][Ee]")
+                list(APPEND LWS_TG_REFUSALS
+                    "${_p} CMAKE_CUDA_ARCHITECTURES is '${_v}': native is refused, name the architectures")
+            endif()
+        elseif(_f AND NOT "${_v}" STREQUAL "${LWS_TG_EXPECTED_CXX}")
             list(APPEND LWS_TG_REFUSALS
                 "${_p} CMAKE_CUDA_HOST_COMPILER is '${_v}', not ${LWS_TG_EXPECTED_CXX} (CUDA with a non-clang host)")
         endif()
@@ -244,6 +305,21 @@ if(DEFINED LWS_LEGS AND NOT "${LWS_LEGS}" STREQUAL "")
         set(_tg_cdir "${_tg_bdir}/CMakeFiles")
         set(_tg_lp "[toolchain][leg ${_tg_leg}]")
 
+        # A CUDA leg: GGML_CUDA is on in the leg's cache (any cache type: a configure that stopped at the
+        # root verdict leaves the preset's value untyped), or a CUDA compiler identity was recorded at
+        # all (fail closed: a recorded identity is always checked). The identity goes through the same
+        # verdict configure runs, together with the C and C++ identities, with the CUDA legs mandatory.
+        set(_tg_cuda_leg FALSE)
+        if(EXISTS "${_tg_bdir}/CMakeCache.txt")
+            file(STRINGS "${_tg_bdir}/CMakeCache.txt" _tg_cuda_lines REGEX "^GGML_CUDA:[A-Z]*=")
+            foreach(_tg_cuda_line IN LISTS _tg_cuda_lines)
+                string(REGEX REPLACE "^GGML_CUDA:[A-Z]*=" "" _tg_cuda_val "${_tg_cuda_line}")
+                string(STRIP "${_tg_cuda_val}" _tg_cuda_val)
+                if(NOT "${_tg_cuda_val}" MATCHES "^([Oo][Ff][Ff]|[Ff][Aa][Ll][Ss][Ee]|0|[Nn][Oo]|[Nn]|)$")
+                    set(_tg_cuda_leg TRUE)
+                endif()
+            endforeach()
+        endif()
         # Exactly one CMake version directory: its compiler-ID files are the recorded identity.
         set(_tg_versions "")
         if(IS_DIRECTORY "${_tg_cdir}")
@@ -261,6 +337,37 @@ if(DEFINED LWS_LEGS AND NOT "${LWS_LEGS}" STREQUAL "")
                 "leg ${_tg_leg}: expected one CMake version directory under ${_tg_cdir}, found ${_tg_nv}")
         else()
             list(GET _tg_versions 0 _tg_vdir)
+            set(_tg_cudac "${_tg_vdir}/CMakeCUDACompiler.cmake")
+            if(EXISTS "${_tg_cudac}")
+                set(_tg_cuda_leg TRUE)
+            endif()
+            set(_tg_cuda_args "")
+            if(_tg_cuda_leg AND NOT EXISTS "${_tg_cudac}")
+                list(APPEND LWS_TG_REFUSALS
+                    "${_tg_lp} GGML_CUDA is on but no CUDA compiler identity was recorded")
+            elseif(_tg_cuda_leg)
+                file(READ "${_tg_cudac}" _tg_cudatext)
+                set(_tg_cu_id "")
+                set(_tg_cu_ver "")
+                set(_tg_cuh_id "")
+                set(_tg_cuh_ver "")
+                if(_tg_cudatext MATCHES "set\\(CMAKE_CUDA_COMPILER_ID \"([^\"]*)\"\\)")
+                    set(_tg_cu_id "${CMAKE_MATCH_1}")
+                endif()
+                if(_tg_cudatext MATCHES "set\\(CMAKE_CUDA_COMPILER_VERSION \"([^\"]*)\"\\)")
+                    set(_tg_cu_ver "${CMAKE_MATCH_1}")
+                endif()
+                if(_tg_cudatext MATCHES "set\\(CMAKE_CUDA_HOST_COMPILER_ID \"([^\"]*)\"\\)")
+                    set(_tg_cuh_id "${CMAKE_MATCH_1}")
+                endif()
+                if(_tg_cudatext MATCHES "set\\(CMAKE_CUDA_HOST_COMPILER_VERSION \"([^\"]*)\"\\)")
+                    set(_tg_cuh_ver "${CMAKE_MATCH_1}")
+                endif()
+                set(_tg_cuda_args CUDA
+                    CUDA_ID "${_tg_cu_id}" CUDA_VERSION "${_tg_cu_ver}"
+                    CUDA_HOST_ID "${_tg_cuh_id}" CUDA_HOST_VERSION "${_tg_cuh_ver}"
+                    EXPECTED_CUDA_MAJOR "${LWS_CUDA_MAJOR}")
+            endif()
             set(_tg_cc "${_tg_vdir}/CMakeCCompiler.cmake")
             set(_tg_cxxc "${_tg_vdir}/CMakeCXXCompiler.cmake")
             if(NOT EXISTS "${_tg_cc}" OR NOT EXISTS "${_tg_cxxc}")
@@ -293,6 +400,7 @@ if(DEFINED LWS_LEGS AND NOT "${LWS_LEGS}" STREQUAL "")
                     lws_clang21_verdict(_tg_reasons
                         C_ID "${_tg_c_id}" C_VERSION "${_tg_c_ver}"
                         CXX_ID "${_tg_cxx_id}" CXX_VERSION "${_tg_cxx_ver}"
+                        ${_tg_cuda_args}
                         EXPECTED_MAJOR "${LWS_LLVM_MAJOR}")
                     foreach(_tg_reason IN LISTS _tg_reasons)
                         list(APPEND LWS_TG_REFUSALS "${_tg_lp} ${_tg_reason}")
@@ -302,7 +410,8 @@ if(DEFINED LWS_LEGS AND NOT "${LWS_LEGS}" STREQUAL "")
         endif()
 
         # Every compile-database entry must be compiled by clang 21 (a ccache or sccache launcher
-        # in front of the compiler is skipped, as ggml enables ccache by default).
+        # in front of the compiler is skipped, as ggml enables ccache by default). An nvcc entry is
+        # judged by its host option instead.
         set(_tg_db "${_tg_bdir}/compile_commands.json")
         if(NOT EXISTS "${_tg_db}")
             list(APPEND LWS_TG_MISSING "leg ${_tg_leg}: no compile database at ${_tg_db}")
@@ -355,17 +464,48 @@ if(DEFINED LWS_LEGS AND NOT "${LWS_LEGS}" STREQUAL "")
                 endif()
             endforeach()
 
-            set(_tg_ok FALSE)
             get_filename_component(_tg_cbase "${_tg_comp}" NAME)
+            if("${_tg_cbase}" STREQUAL "nvcc")
+                # An nvcc unit is compiled by the host named in its -ccbin (or --compiler-bindir) option.
+                set(_tg_host "")
+                set(_tg_host_found FALSE)
+                list(LENGTH _tg_args _tg_nargs)
+                math(EXPR _tg_nlast "${_tg_nargs} - 1")
+                foreach(_tg_k RANGE ${_tg_nlast})
+                    list(GET _tg_args ${_tg_k} _tg_a)
+                    if("${_tg_a}" MATCHES "^(-ccbin|--compiler-bindir)=(.+)$")
+                        set(_tg_host "${CMAKE_MATCH_2}")
+                        set(_tg_host_found TRUE)
+                        break()
+                    elseif("${_tg_a}" STREQUAL "-ccbin" OR "${_tg_a}" STREQUAL "--compiler-bindir")
+                        math(EXPR _tg_kn "${_tg_k} + 1")
+                        if(_tg_kn LESS _tg_nargs)
+                            list(GET _tg_args ${_tg_kn} _tg_host)
+                            set(_tg_host_found TRUE)
+                        endif()
+                        break()
+                    endif()
+                endforeach()
+                if(NOT _tg_host_found)
+                    list(APPEND LWS_TG_REFUSALS
+                        "${_tg_lp} ${_tg_file}: nvcc entry without a host compiler option")
+                else()
+                    lws_tg_is_clang21(_tg_host_ok "${_tg_host}")
+                    if(NOT _tg_host_ok)
+                        list(APPEND LWS_TG_REFUSALS
+                            "${_tg_lp} ${_tg_file}: nvcc host '${_tg_host}' is not clang-${LWS_LLVM_MAJOR} or clang++-${LWS_LLVM_MAJOR}")
+                    endif()
+                endif()
+                continue()
+            endif()
+
+            set(_tg_ok FALSE)
             if("${_tg_comp}" STREQUAL "")
                 set(_tg_ok FALSE)
             elseif("${_tg_cbase}" STREQUAL "${LWS_TG_EXPECTED_C}" OR "${_tg_cbase}" STREQUAL "${LWS_TG_EXPECTED_CXX}")
                 set(_tg_ok TRUE)
-            elseif("${_tg_comp}" MATCHES "/")
-                get_filename_component(_tg_real "${_tg_comp}" REALPATH)
-                if("${_tg_real}" MATCHES "^/usr/lib/llvm-${LWS_LLVM_MAJOR}/")
-                    set(_tg_ok TRUE)
-                endif()
+            else()
+                lws_tg_is_clang21(_tg_ok "${_tg_comp}")
             endif()
             if(NOT _tg_ok)
                 list(APPEND LWS_TG_REFUSALS

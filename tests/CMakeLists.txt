@@ -90,6 +90,48 @@ foreach(_src IN LISTS LWS_VAD_TESTS)
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
 endforeach()
 
+# Decode tests: one executable per file, linked against lws_shell. Label `decode` means a fake backend
+# or no model at all (no ggml compute). A stem ending in _model_test loads a whisper model and runs
+# it with four ggml threads: it also links whisper and carries the labels real-model and ggml-mt.
+# The release leg decodes with base.en and expects the reference transcript exactly. One encoder pass
+# of the larger model costs 34 to 59 s under ThreadSanitizer, so both sanitizer legs use the smaller
+# tiny.en. Its bound is the word-error count measured on both sanitizer legs, the larger of the two,
+# and is 0 because tiny.en also reproduced the reference exactly on each. Support headers in
+# tests/decode are not matched by the glob.
+if("${LWS_SANITIZER}" STREQUAL "off")
+    set(LWS_DECODE_MODEL_NAME base.en)
+    set(LWS_DECODE_MAX_WORD_ERRORS 0)
+else()
+    set(LWS_DECODE_MODEL_NAME tiny.en)
+    set(LWS_DECODE_MAX_WORD_ERRORS 0)
+endif()
+file(GLOB LWS_DECODE_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/decode/*_test.cpp)
+foreach(_src IN LISTS LWS_DECODE_TESTS)
+    get_filename_component(_stem ${_src} NAME_WE)
+    add_executable(decode_${_stem} ${_src})
+    target_link_libraries(decode_${_stem} PRIVATE lws_shell lws_warnings lws_sanitizers GTest::gtest_main)
+    target_include_directories(decode_${_stem} PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_compile_definitions(decode_${_stem} PRIVATE
+        LWS_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures/audio"
+        LWS_SILERO_MODEL_PATH="${PROJECT_SOURCE_DIR}/models/ggml-silero-v5.1.2.bin"
+        LWS_WHISPER_MODEL_PATH="${PROJECT_SOURCE_DIR}/models/ggml-${LWS_DECODE_MODEL_NAME}.bin"
+        LWS_WHISPER_MODEL_NAME="${LWS_DECODE_MODEL_NAME}"
+        LWS_DECODE_MAX_WORD_ERRORS=${LWS_DECODE_MAX_WORD_ERRORS})
+    if(_stem MATCHES "_model_test$" OR _stem STREQUAL "decode_params_test")
+        target_link_libraries(decode_${_stem} PRIVATE whisper)
+    endif()
+    if(_stem MATCHES "_model_test$")
+        # The separator is escaped so the discovery call keeps one LABELS value with two items.
+        set(_label "real-model\\;ggml-mt")
+    else()
+        set(_label decode)
+    endif()
+    gtest_discover_tests(decode_${_stem}
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES LABELS "${_label}" TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
+endforeach()
+
 # Link closure of lws_core. A breadth-first walk over LINK_LIBRARIES and
 # INTERFACE_LINK_LIBRARIES writes every name it meets, sorted, one per line, to the build tree;
 # scripts/core-isolation-gate.cmake reads it in the core_link_closure test and refuses a whisper, ggml,

@@ -83,11 +83,12 @@ if ((status != 0)); then
     exit 1
 fi
 
-# The Silero smoke test loads models/ggml-silero-v5.1.2.bin. fetch-models.sh is idempotent and re-verifies
-# an existing file against scripts/models.sha256, so the legs only ever load verified bytes.
+# The Silero smoke and VAD tests load the Silero model; the decoder tests load base.en on the release
+# leg and tiny.en on the sanitizer legs. fetch-models.sh is idempotent and re-verifies every existing
+# file against its pin in scripts/models.sha256, so the legs only ever load verified bytes.
 stage "models"
 status=0
-scripts/fetch-models.sh silero-v5.1.2 >"$logs/models.log" 2>&1 || status=$?
+scripts/fetch-models.sh silero-v5.1.2 tiny.en base.en >"$logs/models.log" 2>&1 || status=$?
 if ((status != 0)); then
     echo "check: model fetch failed (exit $status); see $logs/models.log" >&2
     exit 1

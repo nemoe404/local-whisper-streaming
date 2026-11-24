@@ -6,8 +6,9 @@ Real-time speech-to-text on a live audio stream with [whisper.cpp](https://githu
 A lock-free ring buffer takes audio in, a Silero voice-activity detector decides which parts are speech,
 and only those parts reach Whisper. Silence costs (almost) nothing.
 
-> **Status: pre-alpha.** The pure core, the lock-free ring, the VAD engine and segmentation on recorded audio
-> are implemented and tested. The decoder, the streaming API and the CLI are not started.
+> **Status: pre-alpha.** The pure core, the lock-free ring, the VAD engine, segmentation on recorded audio and
+> the per-segment decoder (CPU and CUDA) are implemented and tested. The worker thread, the streaming API and the
+> CLI are not started.
 > See [Roadmap](#roadmap).
 
 ## Why
@@ -36,6 +37,13 @@ audio in ──► ring buffer ──► VAD (Silero, whisper.cpp) ──► spe
   detection fails, and a pre-roll that keeps a quiet word onset intact (measured lead-in of 320 ms on recorded
   audio). The n_context difference between whisper.cpp's per-frame probabilities and the reference Silero is
   measured and accepted: maximum difference 0.20 on one frame, mean 0.002, no segment boundary shift.
+- **Decoder** (`src/shell`, policy in `src/core`): one `whisper_full` call per closed segment, whisper's own VAD
+  off in every call, segments under 100 ms return an empty result without a call, and `stop` interrupts an
+  in-flight decode through the abort callback (measured stop-to-return: 3 to 19 ms on CPU). A segment longer
+  than 30 s is decoded in one call and its tail is kept (whisper walks its 30 s windows inside that call).
+  Text spans are timed in samples from the segment start.
+- **CUDA** (built by hand, see below): the same decode on the GPU gives the same text as the CPU build on the
+  recorded segments.
 
 Errors are returned as `std::expected`; no exceptions cross the public API.
 
@@ -59,7 +67,7 @@ Requirements: Linux, clang 21, CMake 3.29+, Conan 2. CUDA is optional.
 
 ```sh
 git submodule update --init --recursive
-./scripts/fetch-models.sh ggml-silero-v5.1.2.bin   # Silero VAD weights; fetched, never committed
+./scripts/fetch-models.sh silero-v5.1.2 base.en tiny.en   # weights fetched by name; never committed
 export LWS_BUILD_ID=dev                             # build/dev/ holds the Conan output and every preset's tree
 ./scripts/deps.sh Debug
 cmake --preset asan-ubsan && cmake --build --preset asan-ubsan
@@ -69,6 +77,25 @@ ctest --preset asan-ubsan
 The presets are `release`, `asan-ubsan` and `tsan`. `./scripts/check.sh` runs the full gate: format,
 toolchain, tuning values, core isolation, ring wait-free, models, dependencies, every leg's build and tests,
 cppcheck and clang-tidy.
+
+### CUDA, built by hand
+
+The `cuda` preset needs a CUDA 13 toolkit at `/usr/local/cuda` and clang 21. It is built and tested by hand,
+never by `./scripts/check.sh`, and CUDA never runs in hosted CI.
+
+```sh
+export LWS_BUILD_ID=dev
+./scripts/deps.sh Release
+cmake --preset cuda
+cmake --build --preset cuda
+ctest --preset cuda
+```
+
+The preset pins nvcc because an older toolkit on `PATH` may reject clang 21. The host compiler is pinned to
+`clang++-21`, and configure stops if CUDA would use another host. The GPU architecture is pinned for the card it
+was built on (`86-real`); override it, or the toolkit path, in a local `CMakeUserPresets.json` that inherits `cuda`,
+and remove that file before running the seeded-defect proofs, which refuse to start while one exists. A cold build compiles every CUDA kernel for that architecture and took about five
+minutes on the machine it was written on.
 
 ## Built on a [whisper.cpp](https://github.com/nemoe404/whisper.cpp/tree/consigliere-v1.9.5) fork
 
@@ -88,10 +115,12 @@ anyone who needs real-time Whisper without the rest.
 1. [x] Pure core: options, ring index, VAD windower, seam merge, replayed on plain values.
 2. [x] Lock-free SPSC ring with counters, discontinuity flag and a ThreadSanitizer proof.
 3. [x] VAD on recorded audio: segments with word onsets intact, golden boundaries, chunking invariance.
-4. [ ] Whisper shell: model loading, per-segment decode, worker thread, timed text events.
-5. [ ] Public streamer API and a `lws-cli` that reads raw PCM from stdin
+4. [x] Decoder: one `whisper_full` call per closed segment, VAD off, 100 ms floor, stop through the abort
+   callback, CPU and CUDA builds.
+5. [ ] Worker thread and timed text events.
+6. [ ] Public streamer API and a `lws-cli` that reads raw PCM from stdin
    (so `pwcap <app> | lws-cli` works).
-6. [ ] CI: static gate on hosted runners (CPU build), GPU build by hand.
+7. [ ] CI: static gate on hosted runners (CPU build), GPU build by hand.
 
 ## License
 

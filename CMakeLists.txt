@@ -15,6 +15,29 @@ if(NOT "${_lws_toolchain_refusals}" STREQUAL "")
 endif()
 message(STATUS "lws: [toolchain] holds")
 
+# CUDA is enabled here, before the whisper.cpp subdirectory, because the compiler identity cannot be
+# read from this directory once ggml enables CUDA inside its own. The host must be clang 21; CMake
+# left alone picks GCC without a word, so the verdict refuses anything else at configure time.
+if(GGML_CUDA)
+    enable_language(CUDA)
+    lws_clang21_verdict(_lws_cuda_refusals
+        C_ID "${CMAKE_C_COMPILER_ID}" C_VERSION "${CMAKE_C_COMPILER_VERSION}"
+        CXX_ID "${CMAKE_CXX_COMPILER_ID}" CXX_VERSION "${CMAKE_CXX_COMPILER_VERSION}"
+        CUDA
+        CUDA_ID "${CMAKE_CUDA_COMPILER_ID}" CUDA_VERSION "${CMAKE_CUDA_COMPILER_VERSION}"
+        CUDA_HOST_ID "${CMAKE_CUDA_HOST_COMPILER_ID}"
+        CUDA_HOST_VERSION "${CMAKE_CUDA_HOST_COMPILER_VERSION}"
+        EXPECTED_MAJOR "${LWS_LLVM_MAJOR}"
+        EXPECTED_CUDA_MAJOR "${LWS_CUDA_MAJOR}")
+    if(NOT "${_lws_cuda_refusals}" STREQUAL "")
+        list(JOIN _lws_cuda_refusals "\n  " _lws_cuda_text)
+        message(FATAL_ERROR
+            "lws: CUDA compiler refused (cmake/Clang21Toolchain.cmake):\n  ${_lws_cuda_text}")
+    endif()
+    message(STATUS
+        "lws: [toolchain][cuda] holds: NVIDIA ${CMAKE_CUDA_COMPILER_VERSION}, host ${CMAKE_CUDA_HOST_COMPILER_ID} ${CMAKE_CUDA_HOST_COMPILER_VERSION}")
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
