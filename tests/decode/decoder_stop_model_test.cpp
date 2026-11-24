@@ -155,5 +155,5 @@ TEST(DecoderStopModel, StopRequestedBeforeTheCallCancelsAndTheContextStaysUsable
     EXPECT_EQ(decoder->whisper_calls(), 2U);
     const std::size_t errors =
         lws::test::word_errors(lws::test::normalised_words(joined_text(again->spans)), *reference);
-    EXPECT_LE(errors, static_cast<std::size_t>(LWS_DECODE_MAX_WORD_ERRORS));
+    EXPECT_TRUE(std::cmp_less_equal(errors, LWS_DECODE_MAX_WORD_ERRORS));
 }

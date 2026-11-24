@@ -81,7 +81,7 @@ Lines broken_promises(const lws::DecodeResult& result, std::uint64_t length, std
          "a span is outside the segment or out of order"},
         {result.spans.front().begin < kFirstWordWindow, "the first span starts late"},
         {result.spans.back().end + kLastEndSlack >= length, "the last span ends early"},
-        {errors <= static_cast<std::size_t>(LWS_DECODE_MAX_WORD_ERRORS), "too many word errors"},
+        {std::cmp_less_equal(errors, LWS_DECODE_MAX_WORD_ERRORS), "too many word errors"},
     }};
     return checks | std::views::filter([](const auto& c) { return !c.first; }) |
            std::views::transform([](const auto& c) { return std::string(c.second); }) |

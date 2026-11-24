@@ -95,15 +95,15 @@ endforeach()
 # it with four ggml threads: it also links whisper and carries the labels real-model and ggml-mt.
 # The release leg decodes with base.en and expects the reference transcript exactly. One encoder pass
 # of the larger model costs 34 to 59 s under ThreadSanitizer, so both sanitizer legs use the smaller
-# tiny.en, which makes a few more word errors; its bound is a ceiling, not a measurement, and is
-# tightened once tiny.en has been measured on those legs. Support headers in tests/decode are not
-# matched by the glob.
+# tiny.en. Its bound is the word-error count measured on both sanitizer legs, the larger of the two,
+# and is 0 because tiny.en also reproduced the reference exactly on each. Support headers in
+# tests/decode are not matched by the glob.
 if("${LWS_SANITIZER}" STREQUAL "off")
     set(LWS_DECODE_MODEL_NAME base.en)
     set(LWS_DECODE_MAX_WORD_ERRORS 0)
 else()
     set(LWS_DECODE_MODEL_NAME tiny.en)
-    set(LWS_DECODE_MAX_WORD_ERRORS 4)
+    set(LWS_DECODE_MAX_WORD_ERRORS 0)
 endif()
 file(GLOB LWS_DECODE_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/decode/*_test.cpp)
 foreach(_src IN LISTS LWS_DECODE_TESTS)
