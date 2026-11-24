@@ -50,6 +50,10 @@ public:
     //    read: Ok reads and maps the spans, Cancelled returns no spans, Failed is
     //    Error::DecodeFailed.
     // Span times count samples from the segment's first sample.
+    // A segment longer than whisper's 30 s window is decoded in sequential windows inside the one
+    // call and nothing is dropped: the last span still ends at the end of the audio. The
+    // Segmenter never emits such a segment, because Options caps the ceiling at 25 s, so there is
+    // no over-length error path.
     [[nodiscard]] std::expected<DecodeResult, Error> decode(const Segment& segment,
                                                             const std::stop_token& stop);
 
