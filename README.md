@@ -6,9 +6,9 @@ Real-time speech-to-text on a live audio stream with [whisper.cpp](https://githu
 A lock-free ring buffer takes audio in, a Silero voice-activity detector decides which parts are speech,
 and only those parts reach Whisper. Silence costs (almost) nothing.
 
-> **Status: pre-alpha.** The pure core, the lock-free ring, the VAD engine, segmentation on recorded audio and
-> the per-segment decoder (CPU and CUDA) are implemented and tested. The worker thread, the streaming API and the
-> CLI are not started.
+> **Status: pre-alpha.** The pure core, the lock-free ring, the VAD engine, segmentation, the per-segment decoder
+> (CPU and CUDA) and the streaming API (`lws::Streamer`, two threads, timed text events) are implemented and
+> tested. The `lws-cli` and hosted CI are not started.
 > See [Roadmap](#roadmap).
 
 ## Why
@@ -44,22 +44,40 @@ audio in ──► ring buffer ──► VAD (Silero, whisper.cpp) ──► spe
   Text spans are timed in samples from the segment start.
 - **CUDA** (built by hand, see below): the same decode on the GPU gives the same text as the CPU build on the
   recorded segments.
+- **Streamer** (`include/lws/streamer.hpp`, `src/shell`): a pump thread cuts utterances with the VAD and a
+  decoder thread decodes them, joined by a bounded segment queue. `push` is wait-free on the producer thread.
+  Events arrive in stream order on the decoder thread: decoded text, and reports of an overrun, a VAD failure,
+  a dropped segment or a failed decode, each with an exact sample range. Times count the offered stream,
+  dropped samples included. `StopMode::Drain` decodes everything accepted before the stop and implies `flush()`;
+  `StopMode::Immediate` interrupts an in-flight decode. A streamer is single-use. Threads are `jthread`s, and
+  a text gate refuses a recursive mutex or a raw thread in the library.
 
 Errors are returned as `std::expected`; no exceptions cross the public API.
 
 ## Usage
 
-Not yet available. The target API:
+The streaming API is implemented; the `lws-cli` binary is not. Error results are shown as comments here.
 
 ```cpp
 #include <lws/streamer.hpp>
+#include <print>
 
-lws::Streamer streamer{lws::Options{.model_path = "ggml-small.bin", .vad_model_path = "silero.bin"}};
-streamer.on_text([](lws::TextEvent event) { std::println("{}", event.text); });
-streamer.start();
-// from an audio callback, 16 kHz mono float32:
-streamer.push(samples);
+auto created = lws::Streamer::create(lws::StreamerOptions{
+    .model_path = "models/ggml-base.en.bin",
+    .vad_model_path = "models/ggml-silero-v5.1.2.bin"});
+if (!created) { /* created.error(): ModelLoad, InvalidStreamerOptions, ... */ }
+lws::Streamer streamer = std::move(*created);
+
+streamer.on_text([](const lws::TextEvent& event) {
+    if (event.kind == lws::EventKind::Text) std::println("{}-{}: {}", event.t_start, event.t_end, event.text);
+});
+streamer.start();           // NotRunning / AlreadyStarted on misuse
+// from an audio callback, 16 kHz mono float32; the span is copied before push returns:
+streamer.push(samples);     // Overrun when the ring is full; the loss is reported as an event
+streamer.stop(lws::StopMode::Drain);  // decodes everything accepted so far, then returns
 ```
+
+Call `on_text` before `start`. Create a new streamer for each stream: a streamer cannot be restarted after `stop`.
 
 ## Build
 
@@ -75,8 +93,8 @@ ctest --preset asan-ubsan
 ```
 
 The presets are `release`, `asan-ubsan` and `tsan`. `./scripts/check.sh` runs the full gate: format,
-toolchain, tuning values, core isolation, ring wait-free, models, dependencies, every leg's build and tests,
-cppcheck and clang-tidy.
+toolchain, tuning values, core isolation, ring wait-free, VAD API, threads, models, dependencies, every leg's
+build and tests, cppcheck and clang-tidy.
 
 ### CUDA, built by hand
 
@@ -117,10 +135,11 @@ anyone who needs real-time Whisper without the rest.
 3. [x] VAD on recorded audio: segments with word onsets intact, golden boundaries, chunking invariance.
 4. [x] Decoder: one `whisper_full` call per closed segment, VAD off, 100 ms floor, stop through the abort
    callback, CPU and CUDA builds.
-5. [ ] Worker thread and timed text events.
-6. [ ] Public streamer API and a `lws-cli` that reads raw PCM from stdin
-   (so `pwcap <app> | lws-cli` works).
-7. [ ] CI: static gate on hosted runners (CPU build), GPU build by hand.
+5. [x] Streamer: pump and decoder threads, bounded segment queue, timed text events, Drain and Immediate stop,
+   overrun and VAD-failure reports, a thread gate.
+6. [x] Public streamer API (`lws::Streamer`, pimpl header, no thread type in `include/lws`).
+7. [ ] `lws-cli` that reads raw PCM from stdin (so `pwcap <app> | lws-cli` works), and the install check.
+8. [ ] CI: static gate on hosted runners (CPU build), GPU build by hand.
 
 ## License
 
