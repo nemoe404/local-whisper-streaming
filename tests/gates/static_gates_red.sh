@@ -172,6 +172,34 @@ proof_toolchain_seed_clang20() {
     mark_red toolchain-seed-clang20
 }
 
+# A preset that turns CUDA on must pin the clang 21 host, an nvcc and explicit architectures. Each seed breaks
+# one pin and is restored before the next. The static layer reads text only, so no toolkit is needed.
+proof_toolchain_cuda_preset() {
+    local seed name preset
+    gate_expect_green toolchain-cuda-preset -- toolchain_static || return 1
+    mark_green toolchain-cuda-preset
+    local -A seeds=(
+        [seed-cuda-gcc-host]='{"name": "seed-cuda-gcc-host", "inherits": "cuda", "cacheVariables": {"CMAKE_CUDA_HOST_COMPILER": "g++"}}'
+        [seed-cuda-unpinned]='{"name": "seed-cuda-unpinned", "inherits": "release", "cacheVariables": {"GGML_CUDA": "ON", "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc", "CMAKE_CUDA_ARCHITECTURES": "86-real"}}'
+        [seed-cuda-native]='{"name": "seed-cuda-native", "inherits": "cuda", "cacheVariables": {"CMAKE_CUDA_ARCHITECTURES": "native"}}'
+        [seed-cuda-no-nvcc]='{"name": "seed-cuda-no-nvcc", "inherits": "release", "cacheVariables": {"GGML_CUDA": "ON", "CMAKE_CUDA_HOST_COMPILER": "clang++-21", "CMAKE_CUDA_ARCHITECTURES": "86-real"}}'
+    )
+    local -A tokens=(
+        [seed-cuda-gcc-host]='CMAKE_CUDA_HOST_COMPILER'
+        [seed-cuda-unpinned]='is not set'
+        [seed-cuda-native]='CMAKE_CUDA_ARCHITECTURES'
+        [seed-cuda-no-nvcc]='CMAKE_CUDA_COMPILER'
+    )
+    for name in seed-cuda-gcc-host seed-cuda-unpinned seed-cuda-native seed-cuda-no-nvcc; do
+        seed=${seeds[$name]}
+        preset="[toolchain][preset $name]"
+        gate_write CMakeUserPresets.json "{\"version\": 6, \"configurePresets\": [$seed]}"
+        red_with "toolchain-cuda-preset-$name" "$preset" "${tokens[$name]}" -- toolchain_static || return 1
+        gate_restore_now || return 1
+    done
+    mark_red toolchain-cuda-preset
+}
+
 proof_toolchain_configure() {
     prepare asan-ubsan || return 1
     gate_expect_green toolchain-configure -- cmake --preset asan-ubsan || return 1

@@ -2,15 +2,21 @@
 # tests/gates/cuda_host_red.sh: the configure-time proof of the CUDA host gate. No arguments.
 #
 # The root enables CUDA itself and runs the toolchain verdict on the CUDA compiler and its host before ggml
-# configures. This script proves that verdict from both sides in fresh binary directories:
-#   green  `cmake --preset cuda` configures with nvcc 13 and the clang 21 host and prints the CUDA verdict line;
-#   red    a seeded preset that inherits `cuda` but forces the CUDA host to g++ stops at configure with the
-#          gate's own `[toolchain][cuda-host]` refusal, and the log names GNU.
+# configures. This script proves that verdict, and the toolchain gate's configured layer that reads what a
+# CUDA leg recorded, from both sides in fresh binary directories:
+#   cuda-host           `cmake --preset cuda` configures with nvcc 13 and the clang 21 host and prints the CUDA
+#                       verdict line; a seeded preset that inherits `cuda` but forces the CUDA host to g++ stops
+#                       at configure with the verdict's own `[toolchain][cuda-host]` refusal naming GNU.
+#   cuda-leg-identity   the configured toolchain gate is green on the clang 21 CUDA leg; the leg left by the
+#                       refused g++ configure (CMake recorded the CUDA identity before the verdict stopped it)
+#                       is refused by the same gate with the same `[toolchain][cuda-host]` token.
+#   cuda-nvcc-host      a copy of the green CUDA leg whose compile database names g++ as every nvcc host
+#                       is refused for the `nvcc host` of its entries.
 #
 # It needs a CUDA 13 toolkit: nvcc at ${LWS_CUDA_NVCC:-/usr/local/cuda/bin/nvcc}. The variable is a test seam;
 # a path that does not exist simulates a machine without the toolkit.
 #
-# Exit: 0 proven (CUDA-HOST-PROVEN proofs=1); 1 a proof failed; 3 harness error (leftovers, tree not
+# Exit: 0 proven (CUDA-HOST-PROVEN proofs=3); 1 a proof failed; 3 harness error (leftovers, tree not
 # restored); 77 no CUDA 13 toolkit (run.sh reports that as NOT RUN, never as a pass).
 set -euo pipefail
 
@@ -55,6 +61,33 @@ step() {
     fi
 }
 
+# red_with_tokens {name} {token}... -- {cmd...}: gate_expect_red for a gate that must show more than one token.
+# The first token goes through gate_expect_red; every further token must also be in the red run's log.
+red_with_tokens() {
+    local name=$1 first out status=0 token
+    shift
+    first=$1
+    local rest=()
+    shift
+    while [[ ${1:-} != -- ]]; do
+        rest+=("$1")
+        shift
+    done
+    shift
+    out=$(gate_expect_red "$name" "$first" -- "$@") || status=$?
+    if ((status != 0)); then
+        printf '%s\n' "$out"
+        return 1
+    fi
+    for token in "${rest[@]}"; do
+        if ! grep -qF -- "$token" "$GATE_LOGS/gates/$name.log"; then
+            echo "RED-FAIL $name: the log lacks '$token' (see $GATE_LOGS/gates/$name.log)"
+            return 1
+        fi
+    done
+    printf '%s\n' "$out"
+}
+
 # The pinned clang 21 host configures and prints the verdict line; a seeded g++ host is refused.
 proof_cuda_host() {
     local rc=0
@@ -84,6 +117,100 @@ proof_cuda_host() {
     gate_restore_now || rc=1
     ((rc == 0)) || return 1
     mark_red cuda-host
+}
+
+leg_gate() {
+    cmake "-DLWS_ROOT=$LWS_GATE_ROOT" "-DLWS_BUILD_ID=$LWS_BUILD_ID" "-DLWS_LEGS=$2" \
+        -P "$LWS_GATE_ROOT/scripts/$1"
+}
+
+# The configured layer reads the CUDA identity CMake recorded: a leg configured with a g++ host is refused
+# although the static layer (user preset restored) is green.
+proof_cuda_leg_identity() {
+    local cache="$LWS_GATE_ROOT/build/gate-seed/seed-cuda-gcc/CMakeCache.txt"
+    if [[ ! -f "$LWS_GATE_ROOT/build/gate-seed/cuda/compile_commands.json" ]]; then
+        step cuda-configure-identity -- cmake --preset cuda || return 1
+    fi
+    gate_expect_green cuda-leg-green -- leg_gate toolchain-gate.cmake cuda || return 1
+    mark_green cuda-leg-identity
+    rm -rf -- "$LWS_GATE_ROOT/build/gate-seed/seed-cuda-gcc"
+    gate_write CMakeUserPresets.json '{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "seed-cuda-gcc",
+      "inherits": "cuda",
+      "cacheVariables": { "CMAKE_CUDA_HOST_COMPILER": "g++" }
+    }
+  ]
+}'
+    # The configure stops at the root verdict; its exit status is the other proof's business.
+    cmake --preset seed-cuda-gcc >"$GATE_LOGS/gates/setup-seed-cuda-gcc.log" 2>&1 || true
+    gate_restore_now || return 1
+    # Recorded for the reader: what the stopped configure left in the cache for GGML_CUDA.
+    grep -E '^GGML_CUDA:' "$cache" >"$GATE_LOGS/gates/seed-cuda-gcc-ggml-cuda.txt" || true
+    red_with_tokens cuda-leg-gcc '[toolchain][leg seed-cuda-gcc]' '[toolchain][cuda-host]' -- \
+        leg_gate toolchain-gate.cmake seed-cuda-gcc || return 1
+    mark_red cuda-leg-identity
+}
+
+# Every nvcc compile-database entry names its host; a database whose hosts were rewritten to g++ is refused
+# for the entries, with the recorded identity left clang 21 so only the entry sweep can refuse.
+proof_cuda_nvcc_host() {
+    local green="$LWS_GATE_ROOT/build/gate-seed/cuda" copy="$LWS_GATE_ROOT/build/gate-seed/seed-nvcc-host"
+    local rewritten
+    if [[ ! -f $green/compile_commands.json ]]; then
+        step cuda-configure-nvcc -- cmake --preset cuda || return 1
+    fi
+    rm -rf -- "$copy"
+    mkdir -p -- "$copy/CMakeFiles"
+    cp -- "$green/CMakeCache.txt" "$green/compile_commands.json" "$copy/"
+    cp -r -- "$green"/CMakeFiles/[0-9]*.[0-9]* "$copy/CMakeFiles/"
+    gate_expect_green cuda-nvcc-copy -- leg_gate toolchain-gate.cmake seed-nvcc-host || {
+        rm -rf -- "$copy"
+        return 1
+    }
+    mark_green cuda-nvcc-host
+    rewritten=$(python3 -I - "$copy/compile_commands.json" <<'PY'
+import json, re, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    entries = json.load(f)
+host = re.compile(r"(-ccbin|--compiler-bindir)([= ])\S+")
+count = 0
+for entry in entries:
+    if "command" in entry:
+        if entry["command"].split()[0].endswith("nvcc"):
+            entry["command"] = host.sub(r"\1\2/usr/bin/g++", entry["command"])
+            count += 1
+    else:
+        args = entry["arguments"]
+        if args[0].endswith("nvcc"):
+            for i, a in enumerate(args):
+                if a in ("-ccbin", "--compiler-bindir") and i + 1 < len(args):
+                    args[i + 1] = "/usr/bin/g++"
+                elif a.startswith(("-ccbin=", "--compiler-bindir=")):
+                    args[i] = a.split("=", 1)[0] + "=/usr/bin/g++"
+            count += 1
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(entries, f)
+print(count)
+PY
+    ) || {
+        rm -rf -- "$copy"
+        return 1
+    }
+    if ((rewritten == 0)); then
+        echo "SETUP-FAIL cuda-nvcc-host: no nvcc entry found to rewrite"
+        rm -rf -- "$copy"
+        return 1
+    fi
+    local rc=0
+    red_with_tokens cuda-nvcc-host-gcc '[toolchain][leg seed-nvcc-host]' 'nvcc host' -- \
+        leg_gate toolchain-gate.cmake seed-nvcc-host || rc=1
+    rm -rf -- "$copy"
+    ((rc == 0)) || return 1
+    mark_red cuda-nvcc-host
 }
 
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
