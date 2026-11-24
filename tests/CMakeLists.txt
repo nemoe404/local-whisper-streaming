@@ -40,10 +40,13 @@ foreach(_src IN LISTS LWS_SMOKE_TESTS)
 endforeach()
 
 # Pure-core tests: one executable per file, linked against lws_core only (no whisper, no model).
+# Internal core headers live under src/core, so a test includes them as "core/<name>.hpp" through the
+# src include path; the link line still names lws_core only, so a core test cannot reach shell code.
 file(GLOB LWS_CORE_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/core/*_test.cpp)
 foreach(_src IN LISTS LWS_CORE_TESTS)
     get_filename_component(_stem ${_src} NAME_WE)
     add_executable(core_${_stem} ${_src})
+    target_include_directories(core_${_stem} PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(core_${_stem} PRIVATE lws_core lws_warnings lws_sanitizers GTest::gtest_main)
     gtest_discover_tests(core_${_stem}
         DISCOVERY_MODE PRE_TEST
