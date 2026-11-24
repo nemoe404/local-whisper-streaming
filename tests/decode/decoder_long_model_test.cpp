@@ -125,7 +125,9 @@ std::expected<RawWalk, std::string> walk_windows() {
     }
 
     lws::AbortHook hook;
-    whisper_full_params params = lws::build_decode_params(lws::DecoderOptions{}, hook);
+    // The parameters borrow the language string from the options, so the options outlive the call.
+    const lws::DecoderOptions options;
+    whisper_full_params params = lws::build_decode_params(options, hook);
     RawWalk walk;
     // True means continue: the callback only counts, it never cancels.
     params.encoder_begin_callback = [](whisper_context* /*ctx*/, whisper_state* /*state*/,
