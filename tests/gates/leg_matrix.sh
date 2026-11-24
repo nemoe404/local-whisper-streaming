@@ -2,10 +2,10 @@
 # tests/gates/leg_matrix.sh: the ctest leg matrix. No arguments.
 #
 # Runs a control row (no seed) and five seeded defects against every candidate leg (the non-hidden configure
-# presets of CMakePresets.json, in file order) and keeps a leg only if some seed turns it red while every
-# other candidate stays green. Each seed in tests/gates/seeds/{name}.cpp is copied to
-# tests/smoke/zz_seed_{name}_test.cpp for its row and removed after it. A ctest skip is a red cell
-# (red:skip), so a skipped test can never make a cell green.
+# presets of CMakePresets.json not marked hand-run, in file order; tests/gates/preset_legs.py lists them)
+# and keeps a leg only if some seed turns it red while every other candidate stays green.
+# Each seed in tests/gates/seeds/{name}.cpp is copied to tests/smoke/zz_seed_{name}_test.cpp for its row and
+# removed after it. A ctest skip is a red cell (red:skip), so a skipped test can never make a cell green.
 #
 # Ordering guard: the rule and the prediction must be frozen before the matrix runs. The record
 # measurements/ctest-legs.md is local-only and is never committed, so git history cannot witness the freeze.
@@ -57,12 +57,11 @@ gate_begin
 matrix_dir="$GATE_LOGS/matrix"
 git rev-parse HEAD >"$matrix_dir/matrix.head"
 
-mapfile -t legs < <(python3 -c '
-import json
-for preset in json.load(open("CMakePresets.json"))["configurePresets"]:
-    if not preset.get("hidden"):
-        print(preset["name"])
-')
+legs_text=$(python3 -I tests/gates/preset_legs.py CMakePresets.json) || {
+    echo "GATE-HARNESS: cannot list the candidate legs" >&2
+    exit 3
+}
+mapfile -t legs <<<"$legs_text"
 if ((${#legs[@]} == 0)); then
     echo "GATE-HARNESS: no candidate leg in CMakePresets.json" >&2
     exit 3

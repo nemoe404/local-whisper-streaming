@@ -321,6 +321,37 @@ PY
     mark_red legs-consistency
 }
 
+# The seeds turn the CUDA preset back into a counted preset (the hand-run marker flipped to false), and then
+# into one with a malformed marker (a string where a boolean belongs). The first must make the leg sets differ
+# and name the preset; the second must stop the script with its own parse error, never drop a leg quietly.
+proof_legs_hand_run() {
+    local source=${LWS_LEGS_AGENTS_MD:-$LWS_GATE_ROOT/AGENTS.md} dir legs rc=0
+    dir=$(mktemp -d)
+    if [[ ! -f $source ]]; then
+        legs=$(sed -n 's/^Decision: legs = //p' measurements/ctest-legs.md)
+        printf 'ctest legs: %s\n' "$legs" >"$dir/fixture.md"
+        source=$dir/fixture.md
+        echo "NOTE legs-hand-run: AGENTS.md is absent; proving on a fixture built from the decision line"
+    fi
+    gate_expect_green legs-hand-run -- env "LWS_LEGS_AGENTS_MD=$source" tests/gates/legs_consistency.sh || rc=1
+    if ((rc == 0)); then
+        mark_green legs-hand-run
+        gate_patch_replace CMakePresets.json '"hand-run": true' '"hand-run": false'
+        red_with legs-hand-run LEGS-DIFFER cuda -- env "LWS_LEGS_AGENTS_MD=$source" \
+            tests/gates/legs_consistency.sh || rc=1
+        gate_restore_now || rc=1
+    fi
+    if ((rc == 0)); then
+        gate_patch_replace CMakePresets.json '"hand-run": true' '"hand-run": "yes"'
+        red_with legs-hand-run-type 'legs_consistency:' 'hand-run' -- env "LWS_LEGS_AGENTS_MD=$source" \
+            tests/gates/legs_consistency.sh || rc=1
+        gate_restore_now || rc=1
+    fi
+    rm -rf -- "$dir"
+    ((rc == 0)) || return 1
+    mark_red legs-hand-run
+}
+
 # The tuning-values gate. The seed names are camel case on purpose: they are the case the
 # gate's lowercase step exists to catch. The gate is a text scan, so a header is never compiled.
 proof_tuning_values() {

@@ -3,7 +3,8 @@
 # No arguments.
 #
 #   scripts/check.sh                the single `legs=(...)` line
-#   CMakePresets.json               the non-hidden configure presets
+#   CMakePresets.json               the non-hidden configure presets not marked hand-run
+#                                   (tests/gates/preset_legs.py)
 #   AGENTS.md                       the line `ctest legs: a, b, c` (local-only; path from LWS_LEGS_AGENTS_MD,
 #                                   default {root}/AGENTS.md; the variable is a test seam for the red proof)
 #   measurements/ctest-legs.md      the line `Decision: legs = a, b, c` (local-only)
@@ -31,8 +32,8 @@ if [[ ! -f $agents ]]; then
 fi
 
 exec python3 -I - "$root" "$agents" <<'PY'
-import json
 import re
+import subprocess
 import sys
 
 root, agents = sys.argv[1], sys.argv[2]
@@ -68,13 +69,15 @@ def names(text):
 check_text = read(f"{root}/scripts/check.sh")
 check_legs = names(only(r"^legs=\(([^)]*)\)$", check_text, "scripts/check.sh legs=(...) line"))
 
-try:
-    presets = json.loads(read(f"{root}/CMakePresets.json"))["configurePresets"]
-except (ValueError, KeyError) as error:
-    fail(f"CMakePresets.json has no readable configurePresets: {error}")
-preset_legs = frozenset(p["name"] for p in presets if not p.get("hidden", False))
+helper = f"{root}/tests/gates/preset_legs.py"
+listed = subprocess.run(
+    [sys.executable, "-I", helper, f"{root}/CMakePresets.json"], capture_output=True, text=True, check=False
+)
+if listed.returncode != 0:
+    fail(f"preset_legs.py failed: {listed.stderr.strip()}")
+preset_legs = frozenset(listed.stdout.split())
 if not preset_legs:
-    fail("CMakePresets.json has no non-hidden configure preset")
+    fail("CMakePresets.json has no configure preset that is a leg")
 
 agent_legs = names(
     only(
