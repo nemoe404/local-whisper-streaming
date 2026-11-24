@@ -309,8 +309,17 @@ inline void run_bounded(const char* name, std::chrono::milliseconds bound,
 class EventLog {
 public:
     void record(const TextEvent& event) noexcept {
-        const std::scoped_lock lock{mutex_};
-        events_.push_back(event);
+        {
+            const std::scoped_lock lock{mutex_};
+            events_.push_back(event);
+        }
+        changed_.notify_all();
+    }
+
+    // False when the bound expires before `count` events arrived.
+    [[nodiscard]] bool wait_for_count(std::size_t count, std::chrono::milliseconds bound) {
+        std::unique_lock lock{mutex_};
+        return changed_.wait_for(lock, bound, [&] { return events_.size() >= count; });
     }
 
     [[nodiscard]] std::vector<TextEvent> events() const {
@@ -320,6 +329,7 @@ public:
 
 private:
     mutable std::mutex mutex_;
+    std::condition_variable changed_;
     std::vector<TextEvent> events_;
 };
 
