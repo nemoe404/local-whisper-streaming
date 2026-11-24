@@ -502,6 +502,41 @@ proof_vad_api() {
     mark_red vad-api
 }
 
+# The thread text gate. The four seeds are real C++ text the gate scans: three appended to a scanned
+# public header (never a tracked file under src/), one written as a temporary file under tests/core. The
+# gate is a text scan, so nothing is compiled.
+proof_threads_gate() {
+    local rc=0
+    gate_expect_green threads-gate -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/threads-gate.cmake" || return 1
+    mark_green threads-gate
+    gate_patch_append include/lws/segment.hpp \
+        'inline std::recursive_mutex lws_seed_recursive;'
+    red_with threads-gate '[threads]' 'recursive_mutex' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/threads-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_append include/lws/segment.hpp \
+        'inline std::recursive_timed_mutex lws_seed_recursive_timed;'
+    red_with threads-gate '[threads]' 'recursive_timed_mutex' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/threads-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_append include/lws/segment.hpp \
+        'inline void lws_seed_raw_thread() { std::thread worker{[] {}}; worker.join(); }'
+    red_with threads-gate '[threads]' 'raw std::thread' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/threads-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_write tests/core/zz_seed_threads.cpp \
+        'inline std::recursive_mutex lws_seed_recursive_in_tests;'
+    red_with threads-gate '[threads]' 'zz_seed_threads' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/threads-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    mark_red threads-gate
+}
+
 # ring_build {preset} {target}: touch the ring header, then build the target. gate_restore_now restores
 # with cp -p, so a restored header carries its old mtime, older than the objects built from the seeded
 # text, and ninja would keep those objects. The touch changes no content (git status and the harness
