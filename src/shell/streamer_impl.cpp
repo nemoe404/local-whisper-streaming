@@ -62,6 +62,7 @@ StreamPosition position_of(const Segmenter& segmenter, const PumpState& state) {
             .fed = segmenter.fed_samples()};
 }
 
+// cppcheck-suppress constParameterReference ; a move-only callable's call operator is not const
 void deliver(TextCallback& callback, const TextEvent& event) {
     if (callback) {
         callback(event);

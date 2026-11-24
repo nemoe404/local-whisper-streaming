@@ -121,9 +121,9 @@ void move_assign_over_running() {
 
 // One lifecycle: create, start, push two utterances, stop, destroy. Returns the events delivered.
 std::vector<lws::TextEvent> one_cycle(std::span<const float> stream, lws::StopMode mode) {
-    IndexedVadLog log;
     EventLog events;
     {
+        IndexedVadLog log;
         lws::Streamer streamer = lws::test::make_test_streamer(
             log, events, lws::test::position_decoder(), stream.size());
         EXPECT_TRUE(streamer.start().has_value());
