@@ -86,7 +86,8 @@ ctest --preset cuda
 The preset pins nvcc because an older toolkit on `PATH` may reject clang 21. The host compiler is pinned to
 `clang++-21`, and configure stops if CUDA would use another host. The GPU architecture is pinned for the card it
 was built on (`86-real`); override it, or the toolkit path, in a local `CMakeUserPresets.json` that inherits `cuda`,
-and remove that file before running the seeded-defect proofs, which refuse to start while one exists.
+and remove that file before running the seeded-defect proofs, which refuse to start while one exists. A cold build compiles every CUDA kernel for that architecture and took about five
+minutes on the machine it was written on.
 
 ## Built on a [whisper.cpp](https://github.com/nemoe404/whisper.cpp/tree/consigliere-v1.9.5) fork
 
