@@ -70,6 +70,24 @@ The presets are `release`, `asan-ubsan` and `tsan`. `./scripts/check.sh` runs th
 toolchain, tuning values, core isolation, ring wait-free, models, dependencies, every leg's build and tests,
 cppcheck and clang-tidy.
 
+### CUDA, built by hand
+
+The `cuda` preset needs a CUDA 13 toolkit at `/usr/local/cuda` and clang 21. It is built and tested by hand,
+never by `./scripts/check.sh`, and CUDA never runs in hosted CI.
+
+```sh
+export LWS_BUILD_ID=dev
+./scripts/deps.sh Release
+cmake --preset cuda
+cmake --build --preset cuda
+ctest --preset cuda
+```
+
+The preset pins nvcc because an older toolkit on `PATH` may reject clang 21. The host compiler is pinned to
+`clang++-21`, and configure stops if CUDA would use another host. The GPU architecture is pinned for the card it
+was built on (`86-real`); override it, or the toolkit path, in a local `CMakeUserPresets.json` that inherits `cuda`,
+and remove that file before running the seeded-defect proofs, which refuse to start while one exists.
+
 ## Built on a [whisper.cpp](https://github.com/nemoe404/whisper.cpp/tree/consigliere-v1.9.5) fork
 
 The build uses `nemoe404/whisper.cpp`, branch `consigliere-v1.9.5`: upstream v1.9.5 plus the patches that
