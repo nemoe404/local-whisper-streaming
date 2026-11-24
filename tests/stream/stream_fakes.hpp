@@ -75,6 +75,7 @@ struct IndexedVadLog {
         std::uint64_t first_index; // index of the first frame of the call
         std::size_t frames;
         bool failed;
+        std::chrono::steady_clock::time_point at; // when the call began
     };
     std::vector<Call> calls;
     std::size_t resets = 0;
@@ -88,6 +89,7 @@ inline VadEngine indexed_engine(IndexedVadLog& log) {
     return VadEngine{
         .detect = [&log, probs = std::vector<float>{}](std::span<const float> samples) mutable
             -> std::expected<std::span<const float>, Error> {
+            const auto began = std::chrono::steady_clock::now();
             const std::size_t chunks = (samples.size() + kVadFrameSamples - 1) / kVadFrameSamples;
             const auto firsts =
                 std::views::iota(std::size_t{0}, chunks) |
@@ -96,7 +98,7 @@ inline VadEngine indexed_engine(IndexedVadLog& log) {
                 std::ranges::any_of(firsts, [](float v) { return v == kFailMarker; });
             const std::uint64_t first_index =
                 samples.size() >= 2 ? static_cast<std::uint64_t>(samples[1]) : 0;
-            log.calls.push_back({first_index, chunks, failed});
+            log.calls.push_back({first_index, chunks, failed, began});
             if (failed) {
                 return std::unexpected(Error::VadFailed);
             }
@@ -269,6 +271,21 @@ inline TextEvent expected_text_event(const Segment& segment) {
 
 inline std::vector<TextEvent> expected_text_events(std::span<const Segment> segments) {
     return segments | std::views::transform(expected_text_event) | std::ranges::to<std::vector>();
+}
+
+// The leg this build is, for the lines tests print: release, asan-ubsan or tsan.
+constexpr const char* sanitizer_leg_name() {
+#if LWS_STREAM_SANITIZER_LEG == 0
+    return "release";
+#elifdef __has_feature
+#if __has_feature(thread_sanitizer)
+    return "tsan";
+#else
+    return "asan-ubsan";
+#endif
+#else
+    return "asan-ubsan";
+#endif
 }
 
 // Runs the body on its own thread and waits for it with a bound. A body that does not finish in
