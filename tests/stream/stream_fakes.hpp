@@ -16,6 +16,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stop_token>
@@ -200,22 +201,33 @@ inline FrameRange frame_range_of(const std::string& text) {
     return range;
 }
 
-// The backend behind position_decoder: the text names the first and last frame index of the
-// segment it was given, over one span from the segment's start to its end. `before_run` runs at
-// the top of every decode, with that decode's stop token, so a test can hold a decode.
+// The text a decoder gives for the frames [first, last] of the segment it was given.
+using TextOfFrames = std::string (*)(std::uint64_t first, std::uint64_t last);
+
+// The backend behind the test decoders: the text names the first and last frame index of the
+// segment it was given, formatted by `text_of`, over one span from the segment's start to its end.
+// `before_run` runs at the top of every decode, with that decode's stop token, so a test can hold a
+// decode. The run with the 1-based number `failing_run` returns -1 without producing text.
 inline DecodeBackend
-position_backend(std::move_only_function<void(const std::stop_token&)> before_run = {}) {
+position_backend(std::move_only_function<void(const std::stop_token&)> before_run = {},
+                 TextOfFrames text_of = position_text,
+                 std::optional<std::size_t> failing_run = std::nullopt) {
     struct State {
         std::size_t size = 0;
         std::uint64_t first = 0;
         std::uint64_t last = 0;
+        std::size_t runs = 0;
     };
     auto state = std::make_shared<State>();
     return DecodeBackend{
-        .run = [state, before_run = std::move(before_run)](
+        .run = [state, failing_run, before_run = std::move(before_run)](
                    std::span<const float> samples, std::stop_token stop) mutable -> std::int32_t {
             if (before_run) {
                 before_run(stop);
+            }
+            ++state->runs;
+            if (failing_run == state->runs) {
+                return -1;
             }
             state->size = samples.size();
             state->first = static_cast<std::uint64_t>(samples[1]);
@@ -223,11 +235,10 @@ position_backend(std::move_only_function<void(const std::stop_token&)> before_ru
             return 0;
         },
         .spans =
-            [state] {
+            [state, text_of] {
                 const std::int64_t end_cs = static_cast<std::int64_t>((state->size + 159) / 160);
-                return std::vector<RawSpan>{{.t0_cs = 0,
-                                             .t1_cs = end_cs,
-                                             .text = position_text(state->first, state->last)}};
+                return std::vector<RawSpan>{
+                    {.t0_cs = 0, .t1_cs = end_cs, .text = text_of(state->first, state->last)}};
             },
     };
 }
@@ -286,6 +297,23 @@ inline Decoder gated_position_decoder(DecodeGate& gate) {
         position_backend([&gate](const std::stop_token& stop) { gate.enter_first(stop); })};
 }
 
+// The text of a decoder that begins and ends on the same word, so a ceiling cut that is merged
+// loses exactly that word and a merge that should not happen shows.
+inline std::string seam_text(std::uint64_t first, std::uint64_t last) {
+    return fmt::format("seam f{} l{} seam", first, last);
+}
+
+// A decoder whose text is seam_text of the segment's frames. Its first decode waits on the gate
+// when one is given; the run with the given 1-based number fails.
+inline Decoder seam_decoder(DecodeGate* gate = nullptr,
+                            std::optional<std::size_t> failing_run = std::nullopt) {
+    std::move_only_function<void(const std::stop_token&)> before_run;
+    if (gate != nullptr) {
+        before_run = [gate](const std::stop_token& stop) { gate->enter_first(stop); };
+    }
+    return Decoder{position_backend(std::move(before_run), seam_text, failing_run)};
+}
+
 // whisper's code for a run its abort callback ended.
 inline constexpr std::int32_t kWhisperAbort = -6;
 
@@ -303,9 +331,10 @@ inline Decoder stop_blocking_decoder(DecodeGate& gate) {
 
 // What a Segmenter cuts from the stream fed in pieces of `chunk` samples and then flushed: the
 // reference the streamer's events are compared against.
-inline std::vector<Segment> direct_segments(std::span<const float> stream, std::size_t chunk) {
+inline std::vector<Segment> direct_segments(std::span<const float> stream, std::size_t chunk,
+                                            const Options& options = Options{}) {
     IndexedVadLog log;
-    auto segmenter = Segmenter::create(indexed_engine(log), Options{}).value();
+    auto segmenter = Segmenter::create(indexed_engine(log), options).value();
     auto pushed = push_chunked(segmenter, stream, chunk);
     if (auto window = segmenter.flush()) {
         pushed.segments.push_back(std::move(*window));
@@ -422,10 +451,11 @@ private:
 // ring and the queue are as large as the caller says. A failure throws, which fails the test.
 inline Streamer make_test_streamer(IndexedVadLog& log, EventLog& events, Decoder decoder,
                                    std::size_t ring_samples, std::size_t queue_segments = 8,
-                                   StallGate* stall = nullptr) {
+                                   StallGate* stall = nullptr, const Options& vad = Options{}) {
     StreamerOptions options;
     options.ring_capacity_samples = ring_samples;
     options.queue_segments = queue_segments;
+    options.vad = vad;
     auto streamer =
         StreamerAccess::assemble(indexed_engine(log, stall), std::move(decoder), options).value();
     streamer.on_text([&events](const TextEvent& event) noexcept { events.record(event); }).value();

@@ -3,6 +3,7 @@
 #include "segment_fifo.hpp"
 
 #include "lws/decode_policy.hpp"
+#include "lws/seam_merge.hpp"
 #include "lws/segment.hpp"
 #include "lws/text_event.hpp"
 
@@ -10,6 +11,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <utility>
 
 namespace lws {
 
@@ -36,5 +38,23 @@ TextEvent notice_event(const Notice& notice) {
                      .text = {},
                      .after_gap = false};
 }
+
+std::optional<TextEvent> SeamText::compose(const Segment& segment, std::span<const TextSpan> spans,
+                                           bool merge_enabled) {
+    std::string raw = joined_text(spans);
+    const bool merge = merge_enabled && segment.continues_previous && !reference_.empty();
+    std::string text = merge ? seam_merge(reference_, raw) : raw;
+    reference_ = segment.reason == CloseReason::Ceiling ? std::move(raw) : std::string{};
+    auto event = text_event(segment, spans);
+    if (!event.has_value() || text.empty()) {
+        return std::nullopt;
+    }
+    event->text = std::move(text);
+    return event;
+}
+
+void SeamText::interrupt() noexcept { reference_.clear(); }
+
+const std::string& SeamText::reference() const noexcept { return reference_; }
 
 } // namespace lws

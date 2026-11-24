@@ -68,26 +68,41 @@ void deliver(TextCallback& callback, const TextEvent& event) {
     }
 }
 
+// What the decoder thread keeps between items: the caller's callback, the seam text and whether
+// continuations are merged.
+struct DecodeSide {
+    Decoder decoder;
+    TextCallback callback;
+    SeamText seam;
+    bool merge = false;
+};
+
 // A decoded segment gives at most one text event; a failed decode gives a DecodeFailure event
-// over the segment's range. A segment too short to decode and a cancelled decode give nothing.
-void report(Decoder& decoder, TextCallback& callback, const Segment& segment,
-            const std::stop_token& stop) {
-    const auto decoded = decoder.decode(segment, stop);
+// over the segment's range and continues the stream with the next item. A segment too short to
+// decode, a cancelled decode and a decode with no text give nothing. Whatever is not a decoded
+// text ends the seam text, so a later continuation is never merged against an earlier segment.
+void report(DecodeSide& side, const Segment& segment, const std::stop_token& stop) {
+    const auto decoded = side.decoder.decode(segment, stop);
     if (!decoded) {
+        side.seam.interrupt();
         const Notice failure{.kind = EventKind::DecodeFailure,
                              .begin = segment.start,
                              .end = segment.start + segment.samples.size()};
-        deliver(callback, notice_event(failure));
+        deliver(side.callback, notice_event(failure));
         return;
     }
-    if (const auto event = text_event(segment, decoded->spans)) {
-        deliver(callback, *event);
+    if (decoded->spans.empty()) {
+        side.seam.interrupt();
+        return;
+    }
+    if (const auto event = side.seam.compose(segment, decoded->spans, side.merge)) {
+        deliver(side.callback, *event);
     }
 }
 
-void report(Decoder& /*decoder*/, TextCallback& callback, const Notice& notice,
-            const std::stop_token& /*stop*/) {
-    deliver(callback, notice_event(notice));
+void report(DecodeSide& side, const Notice& notice, const std::stop_token& /*stop*/) {
+    side.seam.interrupt();
+    deliver(side.callback, notice_event(notice));
 }
 
 } // namespace
@@ -102,9 +117,9 @@ void report(Decoder& /*decoder*/, TextCallback& callback, const Notice& notice,
 class Streamer::Impl {
 public:
     Impl(Segmenter segmenter, Decoder decoder, const StreamerOptions& options)
-        : poll_{options.poll}, ring_{options.ring_capacity_samples},
-          segmenter_{std::move(segmenter)}, decoder_{std::move(decoder)},
-          queue_{options.queue_segments} {}
+        : poll_{options.poll}, merge_seams_{seam_merge_enabled(options.vad)},
+          ring_{options.ring_capacity_samples}, segmenter_{std::move(segmenter)},
+          decoder_{std::move(decoder)}, queue_{options.queue_segments} {}
 
     // Every public call goes through the lifecycle table first: one atomic load of the run state
     // and the pure transition. A refused call changes nothing.
@@ -124,9 +139,12 @@ public:
         assert(segmenter_ && decoder_);
         // Stored before anything launches, so a push that races the start is already admitted.
         state_.store(*next, std::memory_order_release);
-        decoder_thread_ = std::jthread{
-            [this, decoder = std::move(*decoder_), callback = std::move(callback_)](
-                const std::stop_token& stop) mutable { run_decoder(decoder, callback, stop); }};
+        decoder_thread_ =
+            std::jthread{[this, side = DecodeSide{.decoder = std::move(*decoder_),
+                                                  .callback = std::move(callback_),
+                                                  .seam = {},
+                                                  .merge = merge_seams_}](
+                             const std::stop_token& stop) mutable { run_decoder(side, stop); }};
         pump_thread_ =
             std::jthread{[this, segmenter = std::move(*segmenter_)](
                              const std::stop_token& stop) mutable { run_pump(segmenter, stop); }};
@@ -365,13 +383,13 @@ private:
             std::views::iota(0), [&](std::int32_t) { return pump_step(segmenter, state, stop); });
     }
 
-    void run_decoder(Decoder& decoder, TextCallback& callback, const std::stop_token& stop) {
+    void run_decoder(DecodeSide& side, const std::stop_token& stop) {
         std::ignore = std::ranges::find_if(std::views::iota(0), [&](std::int32_t) {
             const auto item = queue_.pop(stop);
             if (!item.has_value()) {
                 return true;
             }
-            std::visit([&](const auto& value) { report(decoder, callback, value, stop); }, *item);
+            std::visit([&](const auto& value) { report(side, value, stop); }, *item);
             return false;
         });
     }
@@ -380,6 +398,7 @@ private:
 
     std::atomic<RunState> state_{RunState::Created};
     std::chrono::milliseconds poll_;
+    bool merge_seams_;
     SpscRing ring_;
     std::optional<Segmenter> segmenter_;
     std::optional<Decoder> decoder_;

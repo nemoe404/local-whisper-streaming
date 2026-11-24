@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -88,4 +89,114 @@ TEST(EventCompose, NoticeEventKeepsTheKindAndRangeAndHasNoText) {
             .kind = kind, .t_start = 700, .t_end = 1212, .text = {}, .after_gap = false};
         EXPECT_EQ(event, expected);
     });
+}
+
+namespace {
+
+lws::Segment seam_segment(std::uint64_t start, lws::CloseReason reason, bool continues_previous) {
+    lws::Segment segment = segment_starting_at(start);
+    segment.reason = reason;
+    segment.continues_previous = continues_previous;
+    return segment;
+}
+
+// One span holding the text, from the segment's first sample.
+std::vector<lws::TextSpan> said(std::string text) { return {span(0, 800, std::move(text))}; }
+
+std::string text_of(const std::optional<lws::TextEvent>& event) {
+    return event.has_value() ? event->text : std::string{"<no event>"};
+}
+
+constexpr auto kCeiling = lws::CloseReason::Ceiling;
+constexpr auto kHangover = lws::CloseReason::Hangover;
+
+} // namespace
+
+TEST(SeamText, AContinuationLosesTheWordsItSharesWithItsPredecessor) {
+    lws::SeamText seam;
+    const auto first = said("we went to the");
+    const auto second = said("the store opened");
+
+    const auto one = seam.compose(seam_segment(0, kCeiling, false), first, true);
+    const auto two = seam.compose(seam_segment(1000, kHangover, true), second, true);
+
+    EXPECT_EQ(text_of(one), "we went to the");
+    EXPECT_EQ(text_of(two), "store opened");
+    // The merged event still starts at its first span.
+    EXPECT_EQ(two.transform([](const lws::TextEvent& event) { return event.t_start; }),
+              std::optional<std::uint64_t>{1000});
+}
+
+TEST(SeamText, TheSameInputsAfterAnInterruptionAreNotMerged) {
+    lws::SeamText seam;
+    const auto first = said("we went to the");
+    const auto second = said("the store opened");
+
+    const auto one = seam.compose(seam_segment(0, kCeiling, false), first, true);
+    seam.interrupt();
+    const auto two = seam.compose(seam_segment(1000, kHangover, true), second, true);
+
+    EXPECT_EQ(text_of(one), "we went to the");
+    EXPECT_EQ(text_of(two), "the store opened");
+    EXPECT_TRUE(seam.reference().empty());
+}
+
+TEST(SeamText, ASegmentThatDidNotCloseAtTheCeilingLeavesNothingToMergeWith) {
+    lws::SeamText seam;
+    const auto first = said("we went to the");
+    const auto second = said("the store opened");
+
+    std::ignore = seam.compose(seam_segment(0, kHangover, false), first, true);
+    EXPECT_TRUE(seam.reference().empty());
+    const auto two = seam.compose(seam_segment(1000, kHangover, true), second, true);
+
+    EXPECT_EQ(text_of(two), "the store opened");
+}
+
+TEST(SeamText, NothingIsMergedWhenMergingIsOff) {
+    lws::SeamText seam;
+    const auto first = said("we went to the");
+    const auto second = said("the store opened");
+
+    std::ignore = seam.compose(seam_segment(0, kCeiling, false), first, false);
+    const auto two = seam.compose(seam_segment(1000, kHangover, true), second, false);
+
+    EXPECT_EQ(text_of(two), "the store opened");
+}
+
+TEST(SeamText, ASegmentThatDoesNotContinueItsPredecessorIsNotMerged) {
+    lws::SeamText seam;
+    const auto first = said("we went to the");
+    const auto second = said("the store opened");
+
+    std::ignore = seam.compose(seam_segment(0, kCeiling, false), first, true);
+    const auto two = seam.compose(seam_segment(1000, kHangover, false), second, true);
+
+    EXPECT_EQ(text_of(two), "the store opened");
+}
+
+TEST(SeamText, ATextThatMergesToNothingGivesNoEventButStillBecomesTheReference) {
+    lws::SeamText seam;
+    const auto first = said("we went to the");
+    const auto second = said("to the");
+    const auto third = said("the store");
+
+    std::ignore = seam.compose(seam_segment(0, kCeiling, false), first, true);
+    const auto two = seam.compose(seam_segment(1000, kCeiling, true), second, true);
+    EXPECT_FALSE(two.has_value());
+    EXPECT_EQ(seam.reference(), "to the");
+    const auto three = seam.compose(seam_segment(2000, kHangover, true), third, true);
+
+    EXPECT_EQ(text_of(three), "store");
+}
+
+TEST(SeamText, ASegmentWithoutSpansGivesNoEventAndEmptiesTheReference) {
+    lws::SeamText seam;
+    const auto first = said("we went to the");
+
+    std::ignore = seam.compose(seam_segment(0, kCeiling, false), first, true);
+    const auto none = seam.compose(seam_segment(1000, kCeiling, true), {}, true);
+
+    EXPECT_FALSE(none.has_value());
+    EXPECT_TRUE(seam.reference().empty());
 }
