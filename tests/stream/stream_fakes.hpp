@@ -83,19 +83,74 @@ struct IndexedVadLog {
     std::size_t resets = 0;
 };
 
+// A frame whose sample 0 is this scores as silence, and makes the indexed engine's detect call
+// wait, once, until the test releases it. It holds the pump inside the VAD while the test fills the
+// ring.
+inline constexpr float kStallMarker = -4.0F;
+
+// How long a held detect call waits before it gives up, so a broken test cannot hold the pump.
+inline constexpr std::chrono::seconds kStallBound{30};
+
+// Holds one detect call and lets the test watch it start. The pump thread calls hold_once; the test
+// waits for entry with a bound and decides when to release.
+class StallGate {
+public:
+    // The first call marks entry and waits for the release or the bound; later calls pass.
+    void hold_once() {
+        std::unique_lock lock{mutex_};
+        if (entered_) {
+            return;
+        }
+        entered_ = true;
+        changed_.notify_all();
+        std::ignore = changed_.wait_for(lock, kStallBound, [this] { return released_; });
+    }
+
+    // False when the bound expires before a detect call entered.
+    [[nodiscard]] bool wait_entered(std::chrono::milliseconds bound) {
+        std::unique_lock lock{mutex_};
+        return changed_.wait_for(lock, bound, [this] { return entered_; });
+    }
+
+    void release() {
+        {
+            const std::scoped_lock lock{mutex_};
+            released_ = true;
+        }
+        changed_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable changed_;
+    bool entered_ = false;
+    bool released_ = false;
+};
+
 // Splits the input into ceil(n / 512) chunks like the other fake engine and reads each chunk's
-// sample 0: the fail marker fails the whole call, any other value is clamped to [0, 1] and is the
-// chunk's probability. A call is logged with the index its first chunk carries (0 for a call too
-// short to carry one, like the startup probe). The test owns the log and outlives the engine.
-inline VadEngine indexed_engine(IndexedVadLog& log) {
+// sample 0: the fail marker fails the whole call, the stall marker holds the call once (see
+// StallGate) and scores as silence, any other value is clamped to [0, 1] and is the chunk's
+// probability. A call is logged with the index its first chunk carries (0 for a call too short to
+// carry one, like the startup probe). `delay` makes every call take at least that long. The test
+// owns the log and the gate and outlives the engine.
+inline VadEngine indexed_engine(IndexedVadLog& log, StallGate* stall = nullptr,
+                                std::chrono::milliseconds delay = std::chrono::milliseconds{0}) {
     return VadEngine{
-        .detect = [&log, probs = std::vector<float>{}](std::span<const float> samples) mutable
+        .detect = [&log, stall, delay,
+                   probs = std::vector<float>{}](std::span<const float> samples) mutable
             -> std::expected<std::span<const float>, Error> {
             const auto began = std::chrono::steady_clock::now();
             const std::size_t chunks = (samples.size() + kVadFrameSamples - 1) / kVadFrameSamples;
             const auto firsts =
                 std::views::iota(std::size_t{0}, chunks) |
                 std::views::transform([&](std::size_t i) { return samples[i * kVadFrameSamples]; });
+            if (stall != nullptr &&
+                std::ranges::any_of(firsts, [](float v) { return v == kStallMarker; })) {
+                stall->hold_once();
+            }
+            if (delay.count() > 0) {
+                std::this_thread::sleep_for(delay);
+            }
             const bool failed =
                 std::ranges::any_of(firsts, [](float v) { return v == kFailMarker; });
             const std::uint64_t first_index =
@@ -360,12 +415,13 @@ private:
 // A streamer over the indexed engine and the given decoder, with its events going to `events`. The
 // ring and the queue are as large as the caller says. A failure throws, which fails the test.
 inline Streamer make_test_streamer(IndexedVadLog& log, EventLog& events, Decoder decoder,
-                                   std::size_t ring_samples, std::size_t queue_segments = 8) {
+                                   std::size_t ring_samples, std::size_t queue_segments = 8,
+                                   StallGate* stall = nullptr) {
     StreamerOptions options;
     options.ring_capacity_samples = ring_samples;
     options.queue_segments = queue_segments;
     auto streamer =
-        StreamerAccess::assemble(indexed_engine(log), std::move(decoder), options).value();
+        StreamerAccess::assemble(indexed_engine(log, stall), std::move(decoder), options).value();
     streamer.on_text([&events](const TextEvent& event) noexcept { events.record(event); }).value();
     return streamer;
 }

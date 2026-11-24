@@ -262,6 +262,23 @@ private:
         }
     }
 
+    // The ring lost audio just after the samples taken so far. The window that was open is closed
+    // where the gap is, and goes to the queue before the report of the loss, so the speech before
+    // the gap is delivered ahead of it. The report covers the dropped samples not yet reported;
+    // two losses seen before the first mark is handled can leave the second with nothing new, and
+    // then only the reset and the close happen. From here on the offset counts every dropped
+    // sample.
+    void handle_gap(Segmenter& segmenter, PumpState& state, std::uint64_t dropped_total) {
+        const std::uint64_t offset = stream_offset(position_of(segmenter, state));
+        if (auto window = segmenter.notify_overrun()) {
+            queue_.push(stamped(std::move(*window), offset));
+        }
+        if (dropped_total > state.skew) {
+            queue_.push(overrun_notice(state.popped, state.skew, dropped_total));
+        }
+        state.skew = dropped_total;
+    }
+
     // Acts on every mark due at the samples taken so far. True when the stream ended.
     bool handle_due(Segmenter& segmenter, PumpState& state, bool& handled) {
         bool finished = false;
@@ -276,11 +293,15 @@ private:
                 flush_window(segmenter, state);
                 return false;
             case MarkKind::Gap:
-                // Gap marks are added by the overrun path, which does not exist yet.
+                handle_gap(segmenter, state, due->dropped_total);
                 return false;
             case MarkKind::Finish:
-                // The end of the stream: the open window is emitted and the queue is closed, so
-                // the decoder thread ends once it has worked off what is queued.
+                // The end of the stream. A loss flagged since the last step is handled first, so
+                // it is never left unreported. Then the open window is emitted and the queue is
+                // closed, so the decoder thread ends once it has worked off what is queued.
+                if (ring_.take_discontinuity()) {
+                    handle_gap(segmenter, state, ring_.counters().dropped);
+                }
                 flush_window(segmenter, state);
                 queue_.close();
                 finished = true;
@@ -301,11 +322,23 @@ private:
     }
 
     // One step of the pump. True ends the thread.
+    //
+    // The ring is looked at for an overrun, and a gap mark is put where one is found. The snapshot
+    // of the available samples is taken first: every sample it counts was accepted before the flag
+    // is read, so it belongs before the gap, and the mark sits after them. The ring keeps no
+    // position for the loss, so this is the best the pump can do. The pump reads at most one piece
+    // per step, because popping frees space, and space is what lets the producer accept audio after
+    // the gap before the pump looks again; that bounds the error in the mark's position by the free
+    // space at the overrun plus one piece. The dropped total is read right after the flag, so it
+    // covers the loss that set it.
     bool pump_step(Segmenter& segmenter, PumpState& state, const std::stop_token& stop) {
         if (stop.stop_requested()) {
             return true;
         }
         const std::size_t available = ring_.available();
+        if (ring_.take_discontinuity()) {
+            state.schedule.add_gap(state.popped + available, ring_.counters().dropped);
+        }
         take_targets(state.schedule, state.popped);
         const std::size_t quota =
             state.schedule.quota(available, state.scratch.size(), state.popped);
