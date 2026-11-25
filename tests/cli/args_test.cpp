@@ -124,15 +124,31 @@ TEST(CliArgs, TheValuesOfTheOptionalFlagsLandInTheConfig) {
     EXPECT_DOUBLE_EQ(config.speed, 1.0);
 }
 
+TEST(CliArgs, StatsIsOffByDefaultAndASwitchTurnsItOn) {
+    EXPECT_FALSE(parsed_run({kModel, "m", kVad, "v"}).stats);
+    EXPECT_TRUE(parsed_run({kModel, "m", kVad, "v", "--stats"}).stats);
+    expect_refused({kModel, "m", kVad, "v", "--stats", "--stats"}, "--stats");
+}
+
+TEST(CliArgs, QueueIsAWholeNumberOfAtLeastOne) {
+    EXPECT_EQ(parsed_run({kModel, "m", kVad, "v"}).queue_segments, 8U);
+    EXPECT_EQ(parsed_run({kModel, "m", kVad, "v", "--queue", "32"}).queue_segments, 32U);
+    expect_refused({kModel, "m", kVad, "v", "--queue", "0"}, "--queue");
+    expect_refused({kModel, "m", kVad, "v", "--queue", "x"}, "--queue");
+    expect_refused({kModel, "m", kVad, "v", "--queue", "-1"}, "--queue");
+    expect_refused({kModel, "m", kVad, "v", "--queue", "2.5"}, "--queue");
+    expect_refused({kModel, "m", kVad, "v", "--queue", ""}, "--queue");
+}
+
 TEST(CliArgs, AnEmptyLanguageIsRefused) {
     expect_refused({kModel, "m", kVad, "v", "--language", ""}, "--language");
 }
 
 TEST(CliArgs, TheUsageTextNamesEveryFlagAndTheInputFormat) {
     const std::string text = lws_cli::usage_text();
-    constexpr std::array<std::string_view, 9> kFlags{"--model",   "--vad-model", "--language",
-                                                     "--threads", "--cpu",       "--ring-seconds",
-                                                     "--speed",   "--help",      "f32le"};
+    constexpr std::array<std::string_view, 11> kFlags{
+        "--model", "--vad-model", "--language", "--threads", "--cpu", "--ring-seconds",
+        "--speed", "--queue",     "--stats",    "--help",    "f32le"};
     std::ranges::for_each(kFlags, [&](std::string_view flag) {
         EXPECT_NE(text.find(flag), std::string::npos) << flag;
     });

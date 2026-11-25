@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -289,4 +290,49 @@ TEST(CliProcess, TrailingBytesAreReportedAndTheRestIsKept) {
     const std::vector<std::string> lines = split_lines(result.out);
     EXPECT_FALSE(lines.empty());
     expect_within_error_bound(lines);
+}
+
+namespace {
+
+// The value of `key` on the line, or nothing when the key is absent. A key that holds `-` has no
+// number.
+std::optional<double> stats_value(const std::string& line, const std::string& key) {
+    const std::regex pattern("(^| )" + key + R"(=([0-9]+(\.[0-9]+)?)( |$))");
+    std::smatch match;
+    if (!std::regex_search(line, match, pattern)) {
+        return std::nullopt;
+    }
+    return std::stod(match[2].str());
+}
+
+constexpr std::array<const char*, 11> kStatsKeys{
+    "audio_s",    "wall_s",     "speed_x",      "load_ms",    "text_events", "lag_ms_median",
+    "lag_ms_p95", "lag_ms_max", "peak_rss_mib", "cpu_user_s", "cpu_sys_s"};
+
+std::vector<std::string> lines_starting_with(const std::string& text, std::string_view prefix) {
+    return split_lines(text) | std::views::filter([prefix](const std::string& line) {
+               return line.starts_with(prefix);
+           }) |
+           std::ranges::to<std::vector>();
+}
+
+} // namespace
+
+TEST(CliProcess, StatsLineIsPrintedOnStderrOnly) {
+    std::vector<std::string> arguments = model_arguments();
+    arguments.emplace_back("--stats");
+
+    const CliResult result = run_cli(arguments, fixture_bytes());
+
+    ASSERT_TRUE(result.status.has_value()) << "lws-cli did not exit in time";
+    EXPECT_EQ(result.status, std::optional<int>{0}) << result.err;
+    const std::vector<std::string> lines = lines_starting_with(result.err, "stats: ");
+    ASSERT_EQ(lines.size(), 1U) << result.err;
+    std::ranges::for_each(kStatsKeys, [&](const char* key) {
+        EXPECT_TRUE(stats_value(lines.front(), key).has_value()) << key << " in " << lines.front();
+    });
+    EXPECT_GE(stats_value(lines.front(), "text_events").value_or(0.0), 1.0);
+    EXPECT_NEAR(stats_value(lines.front(), "audio_s").value_or(0.0), 10.77, 0.01);
+    EXPECT_TRUE(lines_starting_with(result.out, "stats").empty()) << result.out;
+    expect_every_line_is_a_transcript_line(split_lines(result.out));
 }

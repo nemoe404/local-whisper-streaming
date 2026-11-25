@@ -4,6 +4,7 @@
 #include "lws/streamer.hpp"
 
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <expected>
@@ -28,6 +29,10 @@ struct RunConfig {
     double ring_seconds = 60.0;
     // Push at this multiple of real time. 0 pushes as fast as the input arrives.
     double speed = 0.0;
+    // Print one line of measurements on stderr after the stream ended.
+    bool stats = false;
+    // How many finished segments wait for the decoder before the oldest is discarded.
+    std::size_t queue_segments = 8;
 };
 
 struct RunIo {
