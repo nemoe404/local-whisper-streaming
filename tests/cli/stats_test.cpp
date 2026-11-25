@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <numeric>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,22 @@ std::vector<PushMark> three_marks() {
            std::ranges::to<std::vector>();
 }
 
+// The summary of a run that must have one: a missing summary fails the test and gives zeros.
+lws_cli::LagSummary summary_of(std::span<const PushMark> marks,
+                               std::span<const Delivery> deliveries) {
+    const auto summary = lws_cli::lag_summary(marks, deliveries);
+    EXPECT_TRUE(summary.has_value());
+    return summary.value_or(lws_cli::LagSummary{});
+}
+
+void expect_summary(const lws_cli::LagSummary& summary, std::size_t count, double median,
+                    double p95, double max) {
+    EXPECT_EQ(summary.count, count);
+    EXPECT_DOUBLE_EQ(summary.median_ms, median);
+    EXPECT_DOUBLE_EQ(summary.p95_ms, p95);
+    EXPECT_DOUBLE_EQ(summary.max_ms, max);
+}
+
 } // namespace
 
 TEST(CliStats, LagUsesThePushThatHeldTheLastSample) {
@@ -39,39 +57,25 @@ TEST(CliStats, LagUsesThePushThatHeldTheLastSample) {
     const std::array<Delivery, 1> on_the_edge{Delivery{.t_end = 8192, .at = at_ms(900)}};
     const std::array<Delivery, 1> one_past{Delivery{.t_end = 8193, .at = at_ms(900)}};
 
-    const auto first = lws_cli::lag_summary(marks, on_the_edge);
-    const auto second = lws_cli::lag_summary(marks, one_past);
-
-    ASSERT_TRUE(first.has_value());
-    ASSERT_TRUE(second.has_value());
-    EXPECT_DOUBLE_EQ(first->max_ms, 800.0);
-    EXPECT_DOUBLE_EQ(second->max_ms, 700.0);
+    EXPECT_DOUBLE_EQ(summary_of(marks, on_the_edge).max_ms, 800.0);
+    EXPECT_DOUBLE_EQ(summary_of(marks, one_past).max_ms, 700.0);
 }
 
 TEST(CliStats, NearestRankPercentiles) {
     const std::array<PushMark, 1> marks{PushMark{.samples_after = 100, .at = at_ms(0)}};
-    const std::vector<Delivery> twenty =
+    std::vector<Delivery> lags =
         std::views::iota(1, 21) |
         std::views::transform([](int lag) { return Delivery{.t_end = 100, .at = at_ms(lag)}; }) |
         std::ranges::to<std::vector>();
     // Out of order on purpose: the summary sorts.
-    std::vector<Delivery> shuffled = twenty;
-    std::ranges::reverse(shuffled);
+    std::ranges::reverse(lags);
     const std::array<Delivery, 1> single{Delivery{.t_end = 100, .at = at_ms(5)}};
 
-    const auto many = lws_cli::lag_summary(marks, shuffled);
-    const auto one = lws_cli::lag_summary(marks, single);
+    const lws_cli::LagSummary many = summary_of(marks, lags);
+    const lws_cli::LagSummary one = summary_of(marks, single);
 
-    ASSERT_TRUE(many.has_value());
-    EXPECT_EQ(many->count, 20U);
-    EXPECT_DOUBLE_EQ(many->median_ms, 10.0);
-    EXPECT_DOUBLE_EQ(many->p95_ms, 19.0);
-    EXPECT_DOUBLE_EQ(many->max_ms, 20.0);
-    ASSERT_TRUE(one.has_value());
-    EXPECT_EQ(one->count, 1U);
-    EXPECT_DOUBLE_EQ(one->median_ms, 5.0);
-    EXPECT_DOUBLE_EQ(one->p95_ms, 5.0);
-    EXPECT_DOUBLE_EQ(one->max_ms, 5.0);
+    expect_summary(many, 20, 10.0, 19.0, 20.0);
+    expect_summary(one, 1, 5.0, 5.0, 5.0);
 }
 
 TEST(CliStats, NoDeliveriesGiveNoLagSummary) {
@@ -106,9 +110,6 @@ TEST(CliStats, ADeliveryPastEveryMarkUsesTheLastMark) {
     const std::vector<PushMark> marks = three_marks();
     const std::array<Delivery, 1> past{Delivery{.t_end = 1'000'000, .at = at_ms(450)}};
 
-    const auto summary = lws_cli::lag_summary(marks, past);
-
-    ASSERT_TRUE(summary.has_value());
-    EXPECT_DOUBLE_EQ(summary->max_ms, 250.0);
+    EXPECT_DOUBLE_EQ(summary_of(marks, past).max_ms, 250.0);
     EXPECT_FALSE(lws_cli::lag_summary({}, past).has_value());
 }
