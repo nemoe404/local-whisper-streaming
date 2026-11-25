@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
@@ -62,7 +63,8 @@ const std::filesystem::path* missing_model(const lws_cli::RunConfig& config) {
     return missing == paths.end() ? nullptr : *missing;
 }
 
-int run_stream(const lws_cli::RunConfig& config) {
+int run_stream(const lws_cli::RunConfig& config,
+               std::chrono::steady_clock::time_point process_start) {
     if (const std::filesystem::path* missing = missing_model(config)) {
         say(stderr, fmt::format("lws-cli: cannot load model: {}\n", missing->string()));
         return kRuntimeExit;
@@ -71,8 +73,11 @@ int run_stream(const lws_cli::RunConfig& config) {
         say(stderr, "lws-cli: cannot install the signal handlers\n");
         return kRuntimeExit;
     }
-    const lws_cli::RunIo io{
-        .input_fd = 0, .out = stdout, .err = stderr, .stop_flag = &g_stop_requested};
+    const lws_cli::RunIo io{.input_fd = 0,
+                            .out = stdout,
+                            .err = stderr,
+                            .stop_flag = &g_stop_requested,
+                            .process_start = process_start};
     const auto report = lws_cli::run(config, io, lws::StopMode::Drain);
     if (!report) {
         const lws_cli::ErrorText text = lws_cli::error_text(report.error().error);
@@ -85,6 +90,7 @@ int run_stream(const lws_cli::RunConfig& config) {
 } // namespace
 
 int main(int argc, char** argv) {
+    const auto process_start = std::chrono::steady_clock::now();
     const std::span<char*> raw(argv, static_cast<std::size_t>(argc));
     const std::vector<std::string_view> args =
         raw | std::views::drop(1) |
@@ -98,5 +104,5 @@ int main(int argc, char** argv) {
         say(stdout, lws_cli::usage_text());
         return 0;
     }
-    return run_stream(std::get<lws_cli::RunConfig>(*command));
+    return run_stream(std::get<lws_cli::RunConfig>(*command), process_start);
 }

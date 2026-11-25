@@ -96,6 +96,20 @@ Applied apply_speed(RunConfig& config, std::string_view value) {
     return {};
 }
 
+Applied apply_queue(RunConfig& config, std::string_view value) {
+    const auto segments = parse_number<std::size_t>(value);
+    if (!segments || *segments < 1) {
+        return std::unexpected("must be a whole number of at least 1");
+    }
+    config.queue_segments = *segments;
+    return {};
+}
+
+Applied apply_stats(RunConfig& config, std::string_view /*value*/) {
+    config.stats = true;
+    return {};
+}
+
 Applied apply_help(RunConfig& /*config*/, std::string_view /*value*/) { return {}; }
 
 enum class Kind : std::uint8_t { Value, Switch };
@@ -138,6 +152,15 @@ constexpr std::array kFlags{
          .apply = apply_speed,
          .usage = "--speed X            push at X times real time; 0 pushes as fast as input "
                   "arrives (default 0)"},
+    Flag{.name = "--queue",
+         .kind = Kind::Value,
+         .apply = apply_queue,
+         .usage = "--queue N            finished segments that may wait for the decoder, at "
+                  "least 1 (default 8)"},
+    Flag{.name = "--stats",
+         .kind = Kind::Switch,
+         .apply = apply_stats,
+         .usage = "--stats              print one line of measurements on stderr at the end"},
     Flag{.name = "--help",
          .kind = Kind::Switch,
          .apply = apply_help,
@@ -146,7 +169,7 @@ constexpr std::array kFlags{
 
 constexpr std::size_t kModelIndex = 0;
 constexpr std::size_t kVadModelIndex = 1;
-constexpr std::size_t kHelpIndex = 7;
+constexpr std::size_t kHelpIndex = 9;
 static_assert(kFlags[kModelIndex].name == "--model");
 static_assert(kFlags[kVadModelIndex].name == "--vad-model");
 static_assert(kFlags[kHelpIndex].name == "--help");

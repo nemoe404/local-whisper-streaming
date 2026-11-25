@@ -3,6 +3,7 @@
 #include "lws/options.hpp"
 #include "lws/streamer.hpp"
 
+#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +45,10 @@ struct RunIo {
     // When it turns non-zero the loop stops reading and ends the stream as usual. A signal handler
     // sets it. May be null.
     const volatile std::sig_atomic_t* stop_flag = nullptr;
+    // When the process started, for the load time of the stats line. The default, the earliest
+    // time point, means unknown: the load time then runs from the start of the run.
+    std::chrono::steady_clock::time_point process_start =
+        std::chrono::steady_clock::time_point::min();
 };
 
 struct RunReport {

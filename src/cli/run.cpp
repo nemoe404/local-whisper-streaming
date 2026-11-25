@@ -3,10 +3,12 @@
 #include "cli/event_format.hpp"
 #include "cli/pace.hpp"
 #include "cli/pcm_assembler.hpp"
+#include "cli/stats.hpp"
 #include "lws/streamer_options.hpp"
 #include "lws/text_event.hpp"
 
 #include <fmt/format.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -23,6 +25,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace lws_cli {
 
@@ -33,11 +36,13 @@ constexpr std::size_t kReadBytes = 16384;
 // range.
 constexpr double kMaxRingSeconds = 86400.0;
 
-// What the printer counts. It is written on the decoder thread only and read after stop has joined
-// that thread.
+// What the printer counts, and when each text event arrived when the stats line asks for it. It is
+// written on the decoder thread only and read after stop has joined that thread.
 struct EventCounts {
     std::uint64_t text_events = 0;
     std::uint64_t loss_events = 0;
+    bool record_deliveries = false;
+    std::vector<Delivery> deliveries;
 };
 
 // Writes the whole line and flushes. A failed write is ignored on purpose: a reader that went away
@@ -48,13 +53,17 @@ void write_and_flush(std::FILE* stream, std::string_view line) noexcept {
     static_cast<void>(std::fflush(stream));
 }
 
-void print_event(const lws::TextEvent& event, std::FILE* out, std::FILE* err, EventCounts& counts) {
+void print_event(const lws::TextEvent& event, Clock::time_point arrived, std::FILE* out,
+                 std::FILE* err, EventCounts& counts) {
     write_and_flush(goes_to_stdout(event.kind) ? out : err, format_event(event));
     if (event.kind != lws::EventKind::Text) {
         ++counts.loss_events;
         return;
     }
     ++counts.text_events;
+    if (counts.record_deliveries) {
+        counts.deliveries.push_back(Delivery{.t_end = event.t_end, .at = arrived});
+    }
     if (event.after_gap) {
         write_and_flush(
             err, fmt::format("[{} --> {}]  note: audio was lost just before this text\n",
@@ -66,8 +75,10 @@ void print_event(const lws::TextEvent& event, std::FILE* out, std::FILE* err, Ev
 // anything thrown is caught and a fixed line is written instead.
 lws::TextCallback make_printer(const RunIo& io, EventCounts& counts) {
     return [out = io.out, err = io.err, &counts](const lws::TextEvent& event) noexcept {
+        // Stamped before anything is written, so the printing is not part of the lag.
+        const Clock::time_point arrived = Clock::now();
         try {
-            print_event(event, out, err, counts);
+            print_event(event, arrived, out, err, counts);
         } catch (...) {
             static_cast<void>(std::fputs("lws-cli: an event could not be printed\n", err));
         }
@@ -112,9 +123,12 @@ ReadResult read_some(const RunIo& io, std::span<std::byte> buffer) {
 }
 
 // Where the paced stream stands: when the first push happened and how many samples were offered.
+// With `record_marks`, each push is also noted in `marks` for the stats line.
 struct PaceState {
     std::optional<std::chrono::steady_clock::time_point> start;
     std::uint64_t offered = 0;
+    bool record_marks = false;
+    std::vector<PushMark> marks;
 };
 
 // With a speed, waits until the samples offered so far are due. Without one, does not wait.
@@ -144,6 +158,9 @@ std::expected<void, RunFailure> offer(lws::Streamer& streamer, RunReport& report
         return std::unexpected(RunFailure{.error = result.error(), .stage = RunStage::Push});
     }
     state.offered += samples.size();
+    if (state.record_marks) {
+        state.marks.push_back(PushMark{.samples_after = state.offered, .at = Clock::now()});
+    }
     pace(state, start, speed);
     return {};
 }
@@ -166,6 +183,58 @@ void report_ending(const RunIo& io, const RunReport& report) {
     }
 }
 
+// Peak resident memory and the CPU time of this process so far.
+struct ResourceUse {
+    double peak_rss_mib = 0.0;
+    double user_s = 0.0;
+    double system_s = 0.0;
+};
+
+double seconds_of(const timeval& time) {
+    constexpr double kMicrosPerSecond = 1.0e6;
+    return static_cast<double>(time.tv_sec) +
+           (static_cast<double>(time.tv_usec) / kMicrosPerSecond);
+}
+
+ResourceUse resource_use() {
+    constexpr double kKibPerMib = 1024.0;
+    rusage usage{};
+    if (::getrusage(RUSAGE_SELF, &usage) != 0) {
+        return {};
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access): ru_maxrss is in a C union
+    const auto peak_kib = static_cast<double>(usage.ru_maxrss);
+    return {.peak_rss_mib = peak_kib / kKibPerMib,
+            .user_s = seconds_of(usage.ru_utime),
+            .system_s = seconds_of(usage.ru_stime)};
+}
+
+// The times the stats line needs from the run.
+struct RunTimes {
+    Clock::time_point process_start;
+    Clock::time_point started;
+    Clock::time_point stopped;
+};
+
+StatsLine make_stats(const RunReport& report, const RunTimes& times, const PaceState& pace_state,
+                     const EventCounts& counts) {
+    const ResourceUse use = resource_use();
+    const double audio_s =
+        static_cast<double>(report.samples_read) / static_cast<double>(lws::kSampleRateHz);
+    const double wall_s = std::chrono::duration<double>(times.stopped - times.started).count();
+    return StatsLine{
+        .audio_s = audio_s,
+        .wall_s = wall_s,
+        .speed_x = wall_s > 0.0 ? audio_s / wall_s : 0.0,
+        .load_ms =
+            std::chrono::duration<double, std::milli>(times.started - times.process_start).count(),
+        .text_events = counts.text_events,
+        .lag = lag_summary(pace_state.marks, counts.deliveries),
+        .peak_rss_mib = use.peak_rss_mib,
+        .cpu_user_s = use.user_s,
+        .cpu_sys_s = use.system_s};
+}
+
 std::unexpected<RunFailure> failure(lws::Error error, RunStage stage) {
     return std::unexpected(RunFailure{.error = error, .stage = stage});
 }
@@ -181,10 +250,13 @@ std::expected<RunReport, RunFailure> run(const RunConfig& config, const RunIo& i
     options.decoder.n_threads = config.threads;
     options.decoder.use_gpu = config.use_gpu;
     options.ring_capacity_samples = ring_capacity(config.ring_seconds);
+    options.queue_segments = config.queue_segments;
 
+    const Clock::time_point run_begin = Clock::now();
     // Declared before the streamer: the decoder thread writes it, and the streamer's destructor
     // joins that thread first.
     EventCounts counts;
+    counts.record_deliveries = config.stats;
     auto streamer = lws::Streamer::create(options);
     if (!streamer) {
         return failure(streamer.error(), RunStage::Create);
@@ -196,9 +268,11 @@ std::expected<RunReport, RunFailure> run(const RunConfig& config, const RunIo& i
         return failure(started.error(), RunStage::Start);
     }
 
+    const Clock::time_point started = Clock::now();
     RunReport report;
     PcmAssembler assembler;
     PaceState pace_state;
+    pace_state.record_marks = config.stats;
     std::array<std::byte, kReadBytes> buffer{};
     bool warned = false;
     for (;;) {
@@ -230,10 +304,18 @@ std::expected<RunReport, RunFailure> run(const RunConfig& config, const RunIo& i
     if (const auto stopped = streamer->stop(at_end); !stopped) {
         return failure(stopped.error(), RunStage::Stop);
     }
+    const Clock::time_point stopped = Clock::now();
     // stop joined the decoder thread, so the counts are final.
     report.text_events = counts.text_events;
     report.loss_events = counts.loss_events;
     report_ending(io, report);
+    if (config.stats) {
+        const bool process_start_known = io.process_start != Clock::time_point::min();
+        const RunTimes times{.process_start = process_start_known ? io.process_start : run_begin,
+                             .started = started,
+                             .stopped = stopped};
+        say(io, fmt::format("{}\n", format_stats(make_stats(report, times, pace_state, counts))));
+    }
     return report;
 }
 
