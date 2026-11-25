@@ -6,13 +6,6 @@ Real-time speech-to-text on a live audio stream with [whisper.cpp](https://githu
 A lock-free ring buffer takes audio in, a Silero voice-activity detector decides which parts are speech,
 and only those parts reach Whisper. Silence costs (almost) nothing (M4).
 
-> **Status: 0.1.0.** Everything listed below is implemented and tested: the pure core, the lock-free ring, the
-> VAD engine, segmentation, the per-segment decoder (CPU and CUDA), the streaming API (`lws::Streamer`, two
-> threads, timed text events), the `lws-cli` binary and the installable CMake package. The gate runs on the
-> developer's machine with `./scripts/check.sh`; CUDA is built and tested by hand. Every number in this file is a
-> row of the [Measured](#measured) table or is marked as a design constant.
-> See [Roadmap](#roadmap).
-
 ## Why
 
 `whisper-cli` and `whisper_full` work on finished files. Live audio is different: you must cut it into
@@ -27,6 +20,82 @@ audio in ──► ring buffer ──► VAD (Silero, whisper.cpp) ──► spe
 
 Silence is cheap because the VAD is the only thing that runs on it: in M4, 60 s of silence cost 0.36 s of CPU
 against 18.53 s for 60 s of speech (M4).
+
+## Architecture
+
+The code has three layers. The public headers in `include/lws` use only `std` types and the library's own value
+types. The shell owns the threads, the whisper context and the VAD. The core is pure value types and functions
+with no I/O, so it is tested without a model.
+
+### Components
+
+```mermaid
+flowchart LR
+    subgraph app["Your process"]
+        src["Audio source (pwcap, a file, your capture)"]
+        cb["on_text callback (your code or lws-cli printer)"]
+    end
+    subgraph pub["include/lws (std types only)"]
+        api["Streamer, StreamerOptions, TextEvent, Error"]
+    end
+    subgraph shell["src/shell (threads, whisper, VAD)"]
+        ring["SPSC ring of samples"]
+        pump["Pump thread: VadEngine, Segmenter"]
+        queue["SegmentQueue (bounded, drops oldest)"]
+        dec["Decoder thread: Decoder, whisper_full"]
+    end
+    subgraph core["src/core (pure, no I/O)"]
+        win["VadWindower, seam merge"]
+        clock["StreamClock, PumpSchedule"]
+        policy["DecodePolicy, event composition"]
+    end
+
+    src -- "push(samples)" --> api
+    api --> ring
+    ring --> pump
+    pump --> win
+    pump --> clock
+    pump --> queue
+    queue --> dec
+    dec --> policy
+    dec --> cb
+```
+
+### Sequence: from `Streamer::start` to a text event
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Your application
+    participant S as Streamer (public API)
+    participant P as Pump thread
+    participant Q as SegmentQueue
+    participant D as Decoder thread
+    participant W as whisper.cpp
+
+    App->>S: create(StreamerOptions)
+    S->>W: load whisper and Silero models
+    App->>S: start()
+    S->>P: start pump thread
+    S->>D: start decoder thread
+    loop each push
+        App->>S: push(float samples)
+        S->>P: copy into the ring (wait-free, no allocation)
+        P->>P: VAD on 512-sample frames, windower, stream clock
+    end
+    P->>Q: closed utterance (segment)
+    Q->>D: next segment
+    D->>W: whisper_full, one call, VAD off, abort on stop
+    W-->>D: segments and text
+    D->>App: TextEvent callback (stream-time t_start, t_end)
+    App->>S: stop(Drain)
+    S->>P: flush the open window, drain the ring
+    P->>Q: remaining segments
+    D-->>S: every queued segment decoded and delivered
+```
+
+Losses are events too: a full ring (Overrun), a failed VAD call (VadFailure) and a full queue
+(SegmentDropped) each arrive as one `TextEvent` with an exact sample range.
 
 ## What is implemented
 
@@ -119,12 +188,25 @@ was drained, 1 on a runtime error and 2 on a usage error. `--stats` adds one `st
 audio length, wall time, speed, load time, lag percentiles, peak memory and CPU time; the Measured table is made
 with it.
 
-To transcribe one application's output with [pwcap](https://github.com/nemoe404/pipewire-app-capture), ask pwcap
-for the format `lws-cli` reads. pwcap defaults to `s16le`, which `lws-cli` would take for noise:
+### Example: transcribe a running application
+
+[pwcap](https://github.com/nemoe404/pipewire-app-capture) captures one application's audio. Ask it for the
+format `lws-cli` reads (16 kHz, mono, `f32le`); pwcap defaults to `s16le`, which `lws-cli` would take for noise.
+Build pwcap in its `build/release-demo` directory (see its Build section). `PWCAP` is the path to the built binary,
+for example `PWCAP=$HOME/work/pipewire-app-capture/build/release-demo/pwcap`. Run from this repository's root,
+with the release build of `lws-cli` in `build/gate/release`:
 
 ```sh
-pwcap capture --app NAME --rate 16000 --channels 1 --format f32le \
-  | lws-cli --model models/ggml-base.en.bin --vad-model models/ggml-silero-v5.1.2.bin
+"$PWCAP" capture --app Brave --rate 16000 --channels 1 --format f32le \
+  | build/gate/release/lws-cli --model models/ggml-base.en.bin --vad-model models/ggml-silero-v5.1.2.bin
+```
+
+Replace `Brave` with the name `pwcap list` prints for the application that plays speech. Stop with Ctrl-C:
+the last utterance is drained and printed before the exit. Output is one line per utterance:
+
+```
+[00:00:00.000 --> 00:00:04.640]  all the letters in the alphabet in your training set, or you can try to do that.
+[00:00:05.664 --> 00:00:09.664]  And by doing so, you will also have a small vocabulary.
 ```
 
 To replay a file, convert it first. The repository's converter reads a 16-bit WAV, or use ffmpeg:
@@ -246,18 +328,6 @@ inside the graph). Upstream whisper.cpp is MIT-licensed; so is the fork's delta.
 desktops. It runs this same pipeline (ring buffer, VAD, local Whisper) for live interviewer audio, and
 adds transcription, OCR and LLM answer drafting on top. This library is the speech core, extracted for
 anyone who needs real-time Whisper without the rest.
-
-## Roadmap
-
-1. [x] Pure core: options, ring index, VAD windower, seam merge, replayed on plain values.
-2. [x] Lock-free SPSC ring with counters, discontinuity flag and a ThreadSanitizer proof.
-3. [x] VAD on recorded audio: segments with word onsets intact, golden boundaries, chunking invariance.
-4. [x] Decoder: one `whisper_full` call per closed segment, VAD off, 100 ms floor <!-- const -->, stop through the abort
-   callback, CPU and CUDA builds.
-5. [x] Streamer: pump and decoder threads, bounded segment queue, timed text events, Drain and Immediate stop,
-   overrun and VAD-failure reports, a thread gate.
-6. [x] Public streamer API (`lws::Streamer`, pimpl header, no thread type in `include/lws`).
-7. [x] `lws-cli` that reads raw PCM from stdin (so `pwcap <app> | lws-cli` works), and the install check.
 
 ## License
 
