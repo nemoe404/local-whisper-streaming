@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.29)
-project(lws VERSION 0.0.0 LANGUAGES C CXX)
+project(lws VERSION 0.1.0 LANGUAGES C CXX)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # The compiler verdict runs first, before anything else: a wrong compiler stops for this reason only
 # cmake/Clang21Toolchain.cmake owns the pinned LLVM major.
@@ -109,6 +111,30 @@ set(WHISPER_SDL2 OFF CACHE BOOL "whisper: SDL2 support" FORCE)
 add_subdirectory(third_party/whisper.cpp whisper EXCLUDE_FROM_ALL SYSTEM)
 lws_check_ggml_cpu_baseline()
 
+# The fork's targets are adjusted for installation from here, so the submodule stays untouched.
+# install(EXPORT) refuses an include directory under the source tree, and the fork lists some, so each
+# is rewritten to a build-only path. The headers of whisper and ggml are not part of the package:
+# lws's public headers include neither, so their PUBLIC_HEADER sets are cleared and nothing installs them.
+foreach(_lws_foreign IN ITEMS whisper ggml ggml-base ${GGML_AVAILABLE_BACKENDS})
+    if(NOT TARGET ${_lws_foreign})
+        continue()
+    endif()
+    get_target_property(_lws_includes ${_lws_foreign} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_lws_includes)
+        set(_lws_wrapped "")
+        foreach(_lws_dir IN LISTS _lws_includes)
+            if(_lws_dir MATCHES "\\$<")
+                list(APPEND _lws_wrapped "${_lws_dir}")
+            else()
+                list(APPEND _lws_wrapped "$<BUILD_INTERFACE:${_lws_dir}>")
+            endif()
+        endforeach()
+        set_property(TARGET ${_lws_foreign} PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${_lws_wrapped}")
+    endif()
+endforeach()
+set_property(TARGET whisper PROPERTY PUBLIC_HEADER "")
+set_property(TARGET ggml PROPERTY PUBLIC_HEADER "")
+
 add_library(lws_smoke STATIC src/smoke/lws_smoke.cpp)
 target_include_directories(lws_smoke PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(lws_smoke PRIVATE whisper lws_warnings lws_sanitizers)
@@ -120,17 +146,27 @@ target_link_libraries(lws_smoke PRIVATE whisper lws_warnings lws_sanitizers)
 find_package(fmt CONFIG REQUIRED)
 file(GLOB LWS_CORE_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/core/*.cpp)
 add_library(lws_core STATIC ${LWS_CORE_SOURCES})
-target_include_directories(lws_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
+# install(EXPORT) refuses source-directory include paths and targets outside the export set, so the
+# build-only pieces are wrapped in BUILD_INTERFACE. The core-isolation closure walk in tests/CMakeLists.txt
+# strips the generator-expression wrappers and still sees them.
+target_include_directories(lws_core PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+# std::expected and std::move_only_function cross the public headers, so a consumer needs C++23 too.
+target_compile_features(lws_core PUBLIC cxx_std_23)
 target_link_libraries(lws_core PUBLIC fmt::fmt)
-target_link_libraries(lws_core PRIVATE lws_warnings lws_sanitizers)
+target_link_libraries(lws_core PRIVATE $<BUILD_INTERFACE:lws_warnings> $<BUILD_INTERFACE:lws_sanitizers>)
+set_target_properties(lws_core PROPERTIES EXPORT_NAME core)
 
 # lws_shell is the imperative shell: the place whisper.cpp is allowed. lws_core never links it, and its
-# headers stay under src/shell, internal until a public streaming type exists. Globbed like lws_core.
+# headers stay under src/shell: the public streaming type lives under include/lws, and the shell headers
+# are internal, so their directory is a build-only include path. Globbed like lws_core.
 file(GLOB LWS_SHELL_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/shell/*.cpp)
 add_library(lws_shell STATIC ${LWS_SHELL_SOURCES})
-target_include_directories(lws_shell PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(lws_shell PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>)
 target_link_libraries(lws_shell PUBLIC lws_core)
-target_link_libraries(lws_shell PRIVATE whisper lws_warnings lws_sanitizers)
+target_link_libraries(lws_shell PRIVATE whisper $<BUILD_INTERFACE:lws_warnings> $<BUILD_INTERFACE:lws_sanitizers>)
+set_target_properties(lws_shell PROPERTIES EXPORT_NAME lws)
 
 # lws_cli_lib is the command-line tool's logic library: every src/cli source except main.cpp, linked by
 # the tests and by the executable. Globbed like lws_core, so a new src/cli/*.cpp joins it without a CMake
@@ -146,6 +182,40 @@ target_link_libraries(lws_cli_lib PRIVATE lws_warnings lws_sanitizers)
 add_executable(lws_cli src/cli/main.cpp)
 set_target_properties(lws_cli PROPERTIES OUTPUT_NAME lws-cli)
 target_link_libraries(lws_cli PRIVATE lws_cli_lib lws_warnings lws_sanitizers)
+
+# Install and package. Installed: the two lws archives, the whisper and ggml archives they need, the ten
+# public headers, the lws-cli executable, the CMake package and the licence. Never installed: lws_smoke,
+# lws_cli_lib, any test target, an internal header, or a whisper or ggml header. Only a plain release
+# build is packaged: the sanitizer legs carry instrumentation a consumer must not inherit, and the CUDA
+# build is built by hand.
+if(LWS_SANITIZER STREQUAL "off" AND NOT GGML_CUDA)
+    install(TARGETS lws_core lws_shell whisper ggml ggml-base ${GGML_AVAILABLE_BACKENDS}
+            EXPORT lws-targets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    install(TARGETS lws_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/lws
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.hpp")
+    install(EXPORT lws-targets
+            NAMESPACE lws::
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/lws)
+
+    configure_package_config_file(
+        ${PROJECT_SOURCE_DIR}/cmake/lws-config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/lws-config.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/lws)
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/lws-config-version.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMinorVersion)
+    install(FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/lws-config.cmake
+            ${CMAKE_CURRENT_BINARY_DIR}/lws-config-version.cmake
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/lws)
+    install(FILES ${PROJECT_SOURCE_DIR}/LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/lws)
+else()
+    install(CODE "message(FATAL_ERROR \"lws: install refused: only the release preset is packaged; a sanitizer build carries instrumentation a consumer must not inherit, and the CUDA build is built by hand\")")
+endif()
 
 if(LWS_BUILD_TESTS)
     enable_testing()

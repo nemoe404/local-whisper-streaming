@@ -1,0 +1,14 @@
+# lws package configuration. Installed next to lws-targets.cmake; configured by CMake.
+#
+# Dependencies resolve on the consumer's machine: Threads through CMake and fmt through its own
+# package config. Nothing here refers to the build tree or to a source path.
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(fmt CONFIG)
+
+include("${CMAKE_CURRENT_LIST_DIR}/lws-targets.cmake")
+
+check_required_components(lws)
