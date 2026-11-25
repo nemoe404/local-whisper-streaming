@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <csignal>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
@@ -20,6 +21,22 @@ namespace {
 
 constexpr int kRuntimeExit = 1;
 constexpr int kUsageExit = 2;
+
+// Set by the signal handler, read by the run loop between reads. A signal handler can only reach
+// static storage, so this flag is the one non-const global.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+volatile std::sig_atomic_t g_stop_requested = 0;
+
+extern "C" void request_stop(int /*signal*/) { g_stop_requested = 1; }
+
+// SIGINT and SIGTERM end the input. SA_RESTART stays off, so a read that is blocked on stdin
+// returns EINTR and the run loop sees the flag. SIGPIPE keeps its default.
+bool install_stop_handlers() {
+    struct sigaction action{};
+    action.sa_handler = request_stop;
+    sigemptyset(&action.sa_mask);
+    return sigaction(SIGINT, &action, nullptr) == 0 && sigaction(SIGTERM, &action, nullptr) == 0;
+}
 
 void say(std::FILE* stream, const std::string& text) {
     static_cast<void>(std::fputs(text.c_str(), stream));
@@ -50,7 +67,12 @@ int run_stream(const lws_cli::RunConfig& config) {
         say(stderr, fmt::format("lws-cli: cannot load model: {}\n", missing->string()));
         return kRuntimeExit;
     }
-    const lws_cli::RunIo io{.input_fd = 0, .out = stdout, .err = stderr, .stop_flag = nullptr};
+    if (!install_stop_handlers()) {
+        say(stderr, "lws-cli: cannot install the signal handlers\n");
+        return kRuntimeExit;
+    }
+    const lws_cli::RunIo io{
+        .input_fd = 0, .out = stdout, .err = stderr, .stop_flag = &g_stop_requested};
     const auto report = lws_cli::run(config, io, lws::StopMode::Drain);
     if (!report) {
         const lws_cli::ErrorText text = lws_cli::error_text(report.error().error);
