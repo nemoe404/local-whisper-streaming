@@ -111,6 +111,7 @@ TEST(CliArgs, SpeedMustBeFiniteAndNotNegative) {
     expect_refused({kModel, "m", kVad, "v", "--speed", "-0.5"}, "--speed");
     expect_refused({kModel, "m", kVad, "v", "--speed", "fast"}, "--speed");
     expect_refused({kModel, "m", kVad, "v", "--speed", "1e999"}, "--speed");
+    expect_refused({kModel, "m", kVad, "v", "--speed", "1e-9"}, "--speed");
     EXPECT_DOUBLE_EQ(parsed_run({kModel, "m", kVad, "v", "--speed", "0"}).speed, 0.0);
 }
 
