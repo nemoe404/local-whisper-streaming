@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, ring wait-free, vad api, threads, public api, models, deps, then one leg per preset
-# (configure, toolchain, isa, sanitizer, build, ctest, skip count), then cppcheck and clang-tidy over the owned
+# (configure, toolchain, isa, sanitizer, build, ctest, skip count), then the install check, then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
 # reads a pipe.
@@ -204,6 +204,17 @@ for leg in "${legs[@]}"; do
     fi
 done
 
+# The release leg's tree is installed to a temporary prefix and an out-of-tree consumer links it; it runs
+# here because the Release Conan output is in place after the leg loop.
+stage "install"
+status=0
+scripts/install-check.sh >"$logs/install.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: install check failed (exit $status); see $logs/install.log" >&2
+    exit 1
+fi
+tail -n 1 "$logs/install.log"
+
 stage "cppcheck"
 status=0
 scripts/cppcheck.sh || status=$?
@@ -221,4 +232,4 @@ if ((status != 0)); then
 fi
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,core-isolation,ring-wait-free,vad-api,threads,public-api,models,legs(%s),cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,core-isolation,ring-wait-free,vad-api,threads,public-api,models,legs(%s),install,cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
