@@ -8,8 +8,8 @@
 # reported and never counted as a pass. The last line is GATES-PROVEN scripts={passed} not-run={n}. Exit 0 only
 # when no script failed.
 #
-# Hosted CI (deferred) calls this script. check.sh does not call it, because the leg matrix
-# rebuilds every leg once per seed.
+# The script is run by hand on this machine. Hosted CI runs scripts/check.sh only: two of these scripts need
+# local-only files, and the leg matrix rebuilds every leg once per seed.
 set -euo pipefail
 
 if (($# != 0)); then
@@ -24,6 +24,7 @@ gate_scripts=(
 tests/gates/fetch_models_test.sh
 tests/gates/skip_red.sh
 tests/gates/static_gates_red.sh
+tests/gates/release_gates_red.sh
 tests/gates/cuda_host_red.sh
 tests/gates/leg_matrix.sh
 tests/gates/legs_consistency.sh

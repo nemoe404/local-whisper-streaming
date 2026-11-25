@@ -1,4 +1,4 @@
-# Root clang-tidy policy; applies to src/core, src/shell and the public headers under include/lws. Later globs
+# Root clang-tidy policy; applies to src/core, src/shell, src/cli and the public headers under include/lws. Later globs
 # override earlier ones, so the disables sit last in Checks. Comments live here, above the key: a
 # '#' line inside a YAML block scalar is part of the string, not a comment.
 #
@@ -34,5 +34,5 @@ Checks: >
   -cppcoreguidelines-avoid-magic-numbers,
   -portability-avoid-pragma-once
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/(src/core|src/shell|include/lws)/.*'
+HeaderFilterRegex: '.*/(src/core|src/shell|src/cli|include/lws)/.*'
 ...

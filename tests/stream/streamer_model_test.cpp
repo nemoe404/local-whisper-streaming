@@ -35,6 +35,9 @@ constexpr std::size_t kPiece = 1600;
 constexpr std::size_t kLoadOnlyStream = 160000;
 constexpr milliseconds kFirstEventBound{90000};
 constexpr milliseconds kImmediateBound{2000};
+// Long enough for the decoder to start the second segment, short enough that a GPU decode of it
+// has not finished: the stop has to land inside that decode for there to be something to cut.
+constexpr milliseconds kPauseAfterFirstEvent{25};
 
 // The names of the promises the events break: one Text event per copy, each inside its golden
 // range, in order, and within the word-error bound of the reference.
@@ -103,7 +106,7 @@ TEST(StreamerModel, ImmediateCutsTheSecondDecode) {
     ASSERT_TRUE(streamer->flush().has_value());
     ASSERT_TRUE(events.wait_for_count(1, kFirstEventBound));
 
-    std::this_thread::sleep_for(milliseconds{200});
+    std::this_thread::sleep_for(kPauseAfterFirstEvent);
     const auto before = std::chrono::steady_clock::now();
     const bool stopped = streamer->stop(lws::StopMode::Immediate).has_value();
     const auto latency =

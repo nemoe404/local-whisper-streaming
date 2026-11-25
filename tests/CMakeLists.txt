@@ -176,6 +176,42 @@ foreach(_src IN LISTS LWS_STREAM_TESTS)
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
 endforeach()
 
+# The command-line tool's tests: one executable per file, linked against lws_cli_lib. A plain stem is a
+# unit test: it needs no model, starts no process and runs on every leg under label cli. A stem ending in
+# _release_model_test loads the real models, some of them through a separate lws-cli process, which the
+# sanitizer legs' time budget does not cover: it is built on the release leg only (absent on the others,
+# not skipped), links whisper and carries the labels real-model and ggml-mt. Every cli test depends on the
+# lws_cli target, so the binary exists whenever a test that starts it can run.
+file(GLOB LWS_CLI_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/cli/*_test.cpp)
+foreach(_src IN LISTS LWS_CLI_TESTS)
+    get_filename_component(_stem ${_src} NAME_WE)
+    if(_stem MATCHES "_release_model_test$" AND NOT "${LWS_SANITIZER}" STREQUAL "off")
+        continue()
+    endif()
+    add_executable(cli_${_stem} ${_src})
+    add_dependencies(cli_${_stem} lws_cli)
+    target_link_libraries(cli_${_stem} PRIVATE lws_cli_lib lws_warnings lws_sanitizers GTest::gtest_main)
+    target_include_directories(cli_${_stem} PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_compile_definitions(cli_${_stem} PRIVATE
+        LWS_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures/audio"
+        LWS_SILERO_MODEL_PATH="${PROJECT_SOURCE_DIR}/models/ggml-silero-v5.1.2.bin"
+        LWS_WHISPER_MODEL_PATH="${PROJECT_SOURCE_DIR}/models/ggml-${LWS_DECODE_MODEL_NAME}.bin"
+        LWS_WHISPER_MODEL_NAME="${LWS_DECODE_MODEL_NAME}"
+        LWS_DECODE_MAX_WORD_ERRORS=${LWS_DECODE_MAX_WORD_ERRORS}
+        LWS_CLI_EXE="$<TARGET_FILE:lws_cli>")
+    if(_stem MATCHES "_release_model_test$")
+        target_link_libraries(cli_${_stem} PRIVATE whisper)
+        # The separator is escaped so the discovery call keeps one LABELS value with two items.
+        set(_label "real-model\\;ggml-mt")
+    else()
+        set(_label cli)
+    endif()
+    gtest_discover_tests(cli_${_stem}
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES LABELS "${_label}" TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
+endforeach()
+
 # Link closure of lws_core. A breadth-first walk over LINK_LIBRARIES and
 # INTERFACE_LINK_LIBRARIES writes every name it meets, sorted, one per line, to the build tree;
 # scripts/core-isolation-gate.cmake reads it in the core_link_closure test and refuses a whisper, ggml,

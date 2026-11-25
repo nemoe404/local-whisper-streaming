@@ -1,0 +1,14 @@
+# The public headers as they were at commit 2cb3149: the sha256 of every file under include/lws, taken from
+# that commit's blobs, one "<sha256>  <path>" line per file.
+# scripts/api-gate.cmake compares include/lws with this list. A commit that changes a public header changes
+# this file too, and adds a line to the CHANGELOG.
+707864cf6c36c53d9748a341dcf6e040268480aaf4273ea87a1945d399c57a95  include/lws/decode_policy.hpp
+b05238757912764b5d82ad0199dc9a926dd8c5775b2ade281bd9ebfe47bfeef5  include/lws/options.hpp
+5f490086b30ae6ebf78ad9a1dd2beeca8321e8aaed9f182d8228fb704032f2ce  include/lws/ring_index.hpp
+5ecddf6e0714ce3dffb5853eedbae4bc3650f62756ce58f1cbf35fc8869801ce  include/lws/seam_merge.hpp
+1d43f56e7e95eaa48c0e1a0450ff14a807a341af2d5c7a9c23e206edff277e78  include/lws/segment.hpp
+1fabaa8abaff016d9bcf67be6a38829e12a6ba91136fd4c52fa3a2ac382f94ca  include/lws/spsc_ring.hpp
+0e63ebe7267f19b2bef549dfbdfeba83662e38a9ed75dba06908f509931da3a7  include/lws/streamer.hpp
+42a60ad29d40822354b132d3945bbd76684138d72b6c1747b11390320841a359  include/lws/streamer_options.hpp
+bcc9f63b9e5405e9150f8bf14dd7caa4600f4084c656f70fa4590e05564465ed  include/lws/text_event.hpp
+840d25d5857dfdfab67c37bda7b467918f236384e196771bfff8b30a0d0ab1ed  include/lws/vad_windower.hpp
