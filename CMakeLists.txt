@@ -132,6 +132,16 @@ target_include_directories(lws_shell PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(lws_shell PUBLIC lws_core)
 target_link_libraries(lws_shell PRIVATE whisper lws_warnings lws_sanitizers)
 
+# lws_cli_lib is the command-line tool's logic library: every src/cli source except main.cpp, linked by
+# the tests and by the executable. Globbed like lws_core, so a new src/cli/*.cpp joins it without a CMake
+# edit. It consumes only the public headers and is never installed.
+file(GLOB LWS_CLI_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/cli/*.cpp)
+list(FILTER LWS_CLI_SOURCES EXCLUDE REGEX "/main\\.cpp$")
+add_library(lws_cli_lib STATIC ${LWS_CLI_SOURCES})
+target_include_directories(lws_cli_lib PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(lws_cli_lib PUBLIC lws_shell)
+target_link_libraries(lws_cli_lib PRIVATE lws_warnings lws_sanitizers)
+
 if(LWS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

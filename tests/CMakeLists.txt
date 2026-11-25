@@ -176,6 +176,23 @@ foreach(_src IN LISTS LWS_STREAM_TESTS)
         SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
 endforeach()
 
+# The command-line tool's unit tests: one executable per file, linked against lws_cli_lib, run on every
+# leg. They need no model and start no process. Tests that start the real binary join this block
+# together with the executable.
+file(GLOB LWS_CLI_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/cli/*_test.cpp)
+foreach(_src IN LISTS LWS_CLI_TESTS)
+    get_filename_component(_stem ${_src} NAME_WE)
+    add_executable(cli_${_stem} ${_src})
+    target_link_libraries(cli_${_stem} PRIVATE lws_cli_lib lws_warnings lws_sanitizers GTest::gtest_main)
+    target_include_directories(cli_${_stem} PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_compile_definitions(cli_${_stem} PRIVATE
+        LWS_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures/audio")
+    gtest_discover_tests(cli_${_stem}
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES LABELS cli TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION ${LWS_GTEST_SKIP_REGEX})
+endforeach()
+
 # Link closure of lws_core. A breadth-first walk over LINK_LIBRARIES and
 # INTERFACE_LINK_LIBRARIES writes every name it meets, sorted, one per line, to the build tree;
 # scripts/core-isolation-gate.cmake reads it in the core_link_closure test and refuses a whisper, ggml,
