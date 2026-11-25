@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, ring wait-free, vad api, threads, public api, models, deps, then one leg per preset
+# The gate entry point. Stages in order: format, toolchain (presets), tuning values, core isolation, ring wait-free, vad api, threads, public api, readme, models, deps, then one leg per preset
 # (configure, toolchain, isa, sanitizer, build, ctest, skip count), then the install check, then cppcheck and clang-tidy over the owned
 # translation units. Takes no arguments: a leg name would silently
 # narrow the sweep, so any argument is refused. Every exit status is read directly; no gate decision
@@ -99,6 +99,17 @@ status=0
 cmake -DLWS_ROOT="$root" -P "$root/scripts/api-gate.cmake" >"$logs/api.log" 2>&1 || status=$?
 if ((status != 0)); then
     echo "check: public api gate failed (exit $status); see $logs/api.log" >&2
+    exit 1
+fi
+
+# Every number with a unit in the README is a traced row of its Measured table or a marked constant, and each
+# row's commits resolve; a text scan with git lookups, no configure. A shallow clone is refused as missing
+# input, so the checkout must carry the history.
+stage "readme"
+status=0
+cmake -DLWS_ROOT="$root" -P "$root/scripts/readme-gate.cmake" >"$logs/readme.log" 2>&1 || status=$?
+if ((status != 0)); then
+    echo "check: readme gate failed (exit $status); see $logs/readme.log" >&2
     exit 1
 fi
 
@@ -232,4 +243,4 @@ if ((status != 0)); then
 fi
 
 legs_joined=$(IFS=,; printf '%s' "${legs[*]}")
-printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,core-isolation,ring-wait-free,vad-api,threads,public-api,models,legs(%s),install,cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"
+printf 'CHECK-OK stages=format,toolchain-presets,tuning-values,core-isolation,ring-wait-free,vad-api,threads,public-api,readme,models,legs(%s),install,cppcheck,clang-tidy leg-stages=configure,toolchain,isa,sanitizer,build,ctest\n' "$legs_joined"

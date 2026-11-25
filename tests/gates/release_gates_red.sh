@@ -139,6 +139,35 @@ proof_install() {
     mark_red install
 }
 
+# The README numbers gate. Three seeds: a number with a unit and no row or marker, a table row whose lws commit
+# is not a commit of this repository, and a row with three cells. Each is refused with the gate's token and the
+# seed's reason; the README is restored byte for byte after each.
+proof_readme_gate() {
+    local rc=0 row_unknown row_short
+    # shellcheck disable=SC2016  # the backticks are the table's, matched literally
+    row_unknown='| M10 | seeded row | 1 | seeded | seeded | `deadbeefdeadbeefdeadbeefdeadbeefdeadbeef` | `0d0f7531` | seeded | 2026-11-24 |'
+    row_short='| M10 | seeded | 1 |'
+    gate_expect_green readme-gate -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/readme-gate.cmake" || return 1
+    mark_green readme-gate
+    gate_patch_append README.md 'Decoding takes 12 ms on a laptop.'
+    red_with readme-gate '[readme]' 'unmarked number' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/readme-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_replace README.md '| M9 |' "$row_unknown"$'\n| M9 |'
+    red_with readme-gate '[readme]' 'does not resolve' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/readme-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    gate_patch_replace README.md '| M9 |' "$row_short"$'\n| M9 |'
+    red_with readme-gate '[readme]' 'cells' -- cmake "-DLWS_ROOT=$LWS_GATE_ROOT" \
+        -P "$LWS_GATE_ROOT/scripts/readme-gate.cmake" || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+    mark_red readme-gate
+}
+
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
 if ((${#proof_fns[@]} == 0)); then
     echo "release_gates_red: no proof functions found; refusing to pass an empty run" >&2
