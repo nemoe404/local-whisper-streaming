@@ -47,6 +47,15 @@ std::vector<float> feed_sliced(std::span<const std::byte> bytes, std::size_t sli
     return out;
 }
 
+void expect_sliced_feed_matches(std::span<const std::byte> bytes,
+                                std::span<const std::uint32_t> expected, std::size_t slice) {
+    lws_cli::PcmAssembler assembler;
+    const auto out = feed_sliced(bytes, slice, assembler);
+    EXPECT_EQ(bits_of(out), std::vector<std::uint32_t>(expected.begin(), expected.end()))
+        << "slice " << slice;
+    EXPECT_EQ(assembler.pending_bytes(), 0U) << "slice " << slice;
+}
+
 // Ordinary values with the awkward ones spread through them.
 std::vector<float> awkward_buffer() {
     std::vector<float> values(10000);
@@ -73,12 +82,8 @@ TEST(CliPcmAssembler, SlicedFeedsEqualOneWholeFeed) {
     EXPECT_EQ(whole.pending_bytes(), 0U);
 
     constexpr std::array<std::size_t, 5> kSlices{1, 3, 4, 5, 4099};
-    std::ranges::for_each(kSlices, [&](std::size_t slice) {
-        lws_cli::PcmAssembler assembler;
-        const auto out = feed_sliced(bytes, slice, assembler);
-        EXPECT_EQ(bits_of(out), expected) << "slice " << slice;
-        EXPECT_EQ(assembler.pending_bytes(), 0U) << "slice " << slice;
-    });
+    std::ranges::for_each(
+        kSlices, [&](std::size_t slice) { expect_sliced_feed_matches(bytes, expected, slice); });
 
     lws_cli::PcmAssembler assembler;
     EXPECT_EQ(assembler.feed(std::span{bytes}.first(bytes.size())).size(), floats.size());
@@ -133,7 +138,9 @@ TEST(CliPcmAssembler, Int16PairsReadAsFloatLookWrong) {
     std::ranges::for_each(std::views::iota(std::size_t{0}, kSamples), [&](std::size_t index) {
         const double phase = 2.0 * std::numbers::pi * 440.0 * static_cast<double>(index) / 16000.0;
         const auto sample = static_cast<std::int16_t>(std::lround(0.8 * 32767.0 * std::sin(phase)));
-        std::memcpy(bytes.data() + index * 2, &sample, sizeof sample);
+        const auto raw = std::bit_cast<std::uint16_t>(sample);
+        bytes[index * 2] = static_cast<std::byte>(raw & 0xFFU);
+        bytes[(index * 2) + 1] = static_cast<std::byte>(raw >> 8U);
     });
 
     lws_cli::PcmAssembler assembler;
