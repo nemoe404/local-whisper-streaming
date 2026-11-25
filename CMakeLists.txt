@@ -134,13 +134,18 @@ target_link_libraries(lws_shell PRIVATE whisper lws_warnings lws_sanitizers)
 
 # lws_cli_lib is the command-line tool's logic library: every src/cli source except main.cpp, linked by
 # the tests and by the executable. Globbed like lws_core, so a new src/cli/*.cpp joins it without a CMake
-# edit. It consumes only the public headers and is never installed.
+# edit. It consumes only the public headers and is never installed. main.cpp alone is the executable
+# lws-cli: it parses the arguments, installs the signal handlers and calls the library's run function.
 file(GLOB LWS_CLI_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/cli/*.cpp)
 list(FILTER LWS_CLI_SOURCES EXCLUDE REGEX "/main\\.cpp$")
 add_library(lws_cli_lib STATIC ${LWS_CLI_SOURCES})
 target_include_directories(lws_cli_lib PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(lws_cli_lib PUBLIC lws_shell)
 target_link_libraries(lws_cli_lib PRIVATE lws_warnings lws_sanitizers)
+
+add_executable(lws_cli src/cli/main.cpp)
+set_target_properties(lws_cli PROPERTIES OUTPUT_NAME lws-cli)
+target_link_libraries(lws_cli PRIVATE lws_cli_lib lws_warnings lws_sanitizers)
 
 if(LWS_BUILD_TESTS)
     enable_testing()
