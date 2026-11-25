@@ -59,6 +59,19 @@ red_with() {
     printf '%s\n' "$out"
 }
 
+# step {label} -- {cmd...}: a setup command whose failure is a harness failure, not a red or a green.
+step() {
+    local label=$1 log status=0
+    shift
+    [[ ${1:-} == -- ]] && shift
+    log="$GATE_LOGS/gates/setup-$label.log"
+    "$@" >"$log" 2>&1 || status=$?
+    if ((status != 0)); then
+        echo "SETUP-FAIL $label: exit $status (see $log)"
+        return 1
+    fi
+}
+
 # The public header gate. Three seeds: a declaration appended to the entry-point header, a comment-only line
 # appended to another header, and a new file under include/lws. The second seed is why the gate compares
 # bytes: a comment changes no declaration, and the gate still refuses it.
@@ -83,6 +96,47 @@ proof_api_gate() {
     gate_restore_now || return 1
     ((rc == 0)) || return 1
     mark_red api-gate
+}
+
+# The install check. It builds the release preset under the seed tree once, runs the check green, then
+# runs four seeds that each break the package a different way: an installed archive removed, the consumer
+# including an internal header, a public include directory under the source tree, and the source path
+# written into the package config. Each is refused with its own token. Then the tree is restored and the
+# check runs green again.
+proof_install() {
+    local rc=0
+    step install-deps -- scripts/deps.sh Release || return 1
+    step install-configure -- cmake --preset release || return 1
+    step install-build -- cmake --build --preset release || return 1
+    gate_expect_green install -- scripts/install-check.sh || return 1
+    mark_green install
+
+    red_with install '[install]' 'libwhisper.a' -- env LWS_INSTALL_CHECK_DROP=lib/libwhisper.a \
+        scripts/install-check.sh || rc=1
+    ((rc == 0)) || return 1
+
+    gate_patch_append tests/install/consumer.cpp '#include "shell/streamer_impl.hpp"'
+    red_with install '[install]' 'consumer build failed' -- scripts/install-check.sh || rc=1
+    gate_restore_now || return 1
+    ((rc == 0)) || return 1
+
+    # shellcheck disable=SC2016  # the text is CMake's, matched literally
+    gate_patch_replace CMakeLists.txt '$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>' \
+        '${PROJECT_SOURCE_DIR}/include'
+    red_with install-generate 'prefixed in the source directory' -- cmake --preset release || rc=1
+    gate_restore_now || return 1
+    step install-reconfigure-1 -- cmake --preset release || return 1
+    ((rc == 0)) || return 1
+
+    gate_patch_append cmake/lws-config.cmake.in "# configured from $LWS_GATE_ROOT"
+    step install-reconfigure-seed -- cmake --preset release || rc=1
+    red_with install '[install]' 'source path in' -- scripts/install-check.sh || rc=1
+    gate_restore_now || return 1
+    step install-reconfigure-2 -- cmake --preset release || return 1
+    ((rc == 0)) || return 1
+
+    gate_expect_green install-restored -- scripts/install-check.sh || return 1
+    mark_red install
 }
 
 mapfile -t proof_fns < <(sed -n 's/^\(proof_[a-z0-9_]*\)() *{.*/\1/p' "${BASH_SOURCE[0]}")
